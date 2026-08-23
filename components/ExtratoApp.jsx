@@ -274,22 +274,30 @@ export default function ExtratoApp() {
     const total = Math.max(1, Math.floor(Number(exp.installments)) || 1);
     const paidCount = Math.min(total, Math.max(0, Math.floor(Number(exp.paidInstallments)) || 0));
     const groupId = uid();
-    const perInstallmentAmount = (Number(exp.amount) || 0) / total;
+    // Divide o valor igualmente entre o responsável principal e quem mais
+    // estiver marcado em "dividir com" (ex.: consórcio dividido com a namorada).
+    const participants = [exp.personId, ...((exp.splitWith || []).filter(id => id && id !== exp.personId))];
+    const splitGroupId = participants.length > 1 ? uid() : undefined;
+    const perPersonAmount = (Number(exp.amount) || 0) / participants.length;
+    const perInstallmentAmount = perPersonAmount / total;
     // A data informada é a da PRÓXIMA parcela a vencer (nº paidCount+1).
     // As parcelas já pagas ficam com datas retroativas; as futuras seguem em frente a partir dela.
-    const newExpenses = Array.from({ length: total }, (_, i) => ({
-      id: uid(),
-      personId: exp.personId,
-      description: exp.description.trim(),
-      amount: perInstallmentAmount,
-      date: monthsLaterDate(exp.date, i - paidCount),
-      fixed: !!exp.fixed,
-      category: exp.category || DEFAULT_CATEGORY,
-      installmentNumber: i + 1,
-      installmentTotal: total,
-      ...(total > 1 ? { installmentGroupId: groupId } : {}),
-      paid: i < paidCount,
-    }));
+    const newExpenses = participants.flatMap(personId =>
+      Array.from({ length: total }, (_, i) => ({
+        id: uid(),
+        personId,
+        description: exp.description.trim(),
+        amount: perInstallmentAmount,
+        date: monthsLaterDate(exp.date, i - paidCount),
+        fixed: !!exp.fixed,
+        category: exp.category || DEFAULT_CATEGORY,
+        installmentNumber: i + 1,
+        installmentTotal: total,
+        ...(total > 1 ? { installmentGroupId: groupId } : {}),
+        ...(splitGroupId ? { splitGroupId, splitCount: participants.length } : {}),
+        paid: i < paidCount,
+      }))
+    );
     setOtherExpenses(t => [...t, ...newExpenses]);
   }
   function removeOtherExpense(id) {
@@ -753,6 +761,7 @@ function OtherExpensesSection({ expenses, people, filterPerson, selectedMonth, o
   const [category, setCategory] = useState(DEFAULT_CATEGORY);
   const [installments, setInstallments] = useState('1');
   const [paidInstallments, setPaidInstallments] = useState('0');
+  const [splitWith, setSplitWith] = useState([]);
   const [onlyFixed, setOnlyFixed] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
@@ -761,15 +770,22 @@ function OtherExpensesSection({ expenses, people, filterPerson, selectedMonth, o
     if (people.length > 0 && !people.find(p => p.id === personId)) setPersonId(people[0].id);
   }, [people]);
 
+  // Se a pessoa selecionada como responsável estiver marcada em "dividir com",
+  // tira ela de lá pra não duplicar.
+  useEffect(() => {
+    setSplitWith(prev => prev.filter(id => id !== personId));
+  }, [personId]);
+
   useEffect(() => {
     setDate(`${selectedMonth}-01`);
   }, [selectedMonth]);
 
   const installmentsNum = Math.max(1, Math.floor(Number(installments)) || 1);
+  const splitCount = 1 + splitWith.length;
 
   function submit() {
-    onAdd({ description: desc, amount, personId, date, fixed, category, installments, paidInstallments });
-    setDesc(''); setAmount(''); setFixed(false); setCategory(DEFAULT_CATEGORY); setInstallments('1'); setPaidInstallments('0');
+    onAdd({ description: desc, amount, personId, date, fixed, category, installments, paidInstallments, splitWith });
+    setDesc(''); setAmount(''); setFixed(false); setCategory(DEFAULT_CATEGORY); setInstallments('1'); setPaidInstallments('0'); setSplitWith([]);
   }
 
   function startEdit(e) {
@@ -835,15 +851,37 @@ function OtherExpensesSection({ expenses, people, filterPerson, selectedMonth, o
             <input type="number" min="0" max={installmentsNum} placeholder="0" value={paidInstallments}
               onChange={e => setPaidInstallments(e.target.value)} style={{ width: 60 }} />
           </label>
+          {people.length > 1 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.78rem', color: 'var(--text-dim)', flexWrap: 'wrap' }}>
+              dividir com
+              {people.filter(p => p.id !== personId).map(p => (
+                <label key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={splitWith.includes(p.id)}
+                    onChange={e => setSplitWith(prev => e.target.checked ? [...prev, p.id] : prev.filter(id => id !== p.id))}
+                    style={{ width: 'auto', padding: 0 }}
+                  />
+                  {p.name}
+                </label>
+              ))}
+            </div>
+          )}
           <button className="primary" onClick={submit}><Plus size={14} /> Lançar</button>
         </div>
       )}
       {people.length > 0 && installmentsNum > 1 && (
         <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '-0.6rem', marginBottom: '0.9rem' }}>
-          Vai gerar {installmentsNum} lançamentos de {money((Number(amount) || 0) / installmentsNum)}.{' '}
+          Vai gerar {installmentsNum} lançamentos de {money((Number(amount) || 0) / splitCount / installmentsNum)}.{' '}
           {Number(paidInstallments) > 0
             ? <>{Number(paidInstallments)} já pagas (datadas antes de {fmtDate(date)}) e {installmentsNum - Number(paidInstallments)} a partir de {fmtDate(date)}, uma por mês.</>
             : <>Uma por mês a partir de {fmtDate(date)}. Ex.: financiamento de moto em {installmentsNum}x.</>}
+          {splitCount > 1 && <> Dividido entre {splitCount} pessoas.</>}
+        </p>
+      )}
+      {people.length > 0 && installmentsNum === 1 && splitCount > 1 && (
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '-0.6rem', marginBottom: '0.9rem' }}>
+          Vai gerar {splitCount} lançamentos de {money((Number(amount) || 0) / splitCount)}, um pra cada pessoa.
         </p>
       )}
 
@@ -886,6 +924,11 @@ function OtherExpensesSection({ expenses, people, filterPerson, selectedMonth, o
                   {e.installmentTotal > 1 && (
                     <span className="mono" style={{ fontSize: '0.65rem', color: 'var(--bg)', background: 'var(--info)', borderRadius: 4, padding: '0.1rem 0.4rem', fontWeight: 600 }}>
                       {e.installmentNumber}/{e.installmentTotal}
+                    </span>
+                  )}
+                  {e.splitGroupId && (
+                    <span title={`Dividido entre ${e.splitCount} pessoas`} style={{ fontSize: '0.65rem', color: 'var(--text-dim)', background: 'var(--border)', borderRadius: 4, padding: '0.1rem 0.4rem', fontWeight: 600, letterSpacing: '0.03em' }}>
+                      DIVIDIDO ÷{e.splitCount}
                     </span>
                   )}
                 </span>
