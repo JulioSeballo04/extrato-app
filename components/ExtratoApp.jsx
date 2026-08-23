@@ -156,9 +156,6 @@ export default function ExtratoApp() {
           setCardTransactions(data.cardTransactions || []);
           setOtherExpenses(data.otherExpenses || []);
           if (data.paletteKey && PALETTES[data.paletteKey]) setPaletteKey(data.paletteKey);
-          const months = [...(data.cardTransactions || []), ...(data.otherExpenses || [])]
-            .map(t => t.date && t.date.slice(0, 7)).filter(Boolean);
-          if (months.length > 0) setSelectedMonth(months.sort().at(-1));
         } else {
           const seed = seedData();
           setPeople(seed.people);
