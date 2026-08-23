@@ -239,13 +239,15 @@ export default function ExtratoApp() {
     const paidCount = Math.min(total, Math.max(0, Math.floor(Number(tx.paidInstallments)) || 0));
     const groupId = uid();
     const perInstallmentAmount = (Number(tx.amount) || 0) / total;
+    // A data informada é a da PRÓXIMA parcela a vencer (nº paidCount+1).
+    // As parcelas já pagas ficam com datas retroativas; as futuras seguem em frente a partir dela.
     const newTxs = Array.from({ length: total }, (_, i) => ({
       id: uid(),
       cardId,
       personId: tx.personId,
       description: tx.description.trim(),
       amount: perInstallmentAmount,
-      date: monthsLaterDate(tx.date, i),
+      date: monthsLaterDate(tx.date, i - paidCount),
       category: tx.category || DEFAULT_CATEGORY,
       installmentNumber: i + 1,
       installmentTotal: total,
@@ -276,12 +278,14 @@ export default function ExtratoApp() {
     const paidCount = Math.min(total, Math.max(0, Math.floor(Number(exp.paidInstallments)) || 0));
     const groupId = uid();
     const perInstallmentAmount = (Number(exp.amount) || 0) / total;
+    // A data informada é a da PRÓXIMA parcela a vencer (nº paidCount+1).
+    // As parcelas já pagas ficam com datas retroativas; as futuras seguem em frente a partir dela.
     const newExpenses = Array.from({ length: total }, (_, i) => ({
       id: uid(),
       personId: exp.personId,
       description: exp.description.trim(),
       amount: perInstallmentAmount,
-      date: monthsLaterDate(exp.date, i),
+      date: monthsLaterDate(exp.date, i - paidCount),
       fixed: !!exp.fixed,
       category: exp.category || DEFAULT_CATEGORY,
       installmentNumber: i + 1,
@@ -676,7 +680,10 @@ function CardLedger({ card, people, transactions, selectedMonth, onAddTx, onRemo
       )}
       {people.length > 0 && installmentsNum > 1 && (
         <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '-0.6rem', marginBottom: '0.9rem' }}>
-          Vai gerar {installmentsNum} lançamentos de {money((Number(amount) || 0) / installmentsNum)}, um por mês a partir de {fmtDate(date)}.
+          Vai gerar {installmentsNum} lançamentos de {money((Number(amount) || 0) / installmentsNum)}.{' '}
+          {Number(paidInstallments) > 0
+            ? <>{Number(paidInstallments)} já pagas (datadas antes de {fmtDate(date)}) e {installmentsNum - Number(paidInstallments)} a partir de {fmtDate(date)}, uma por mês.</>
+            : <>Uma por mês a partir de {fmtDate(date)}.</>}
         </p>
       )}
 
@@ -805,7 +812,7 @@ function OtherExpensesSection({ expenses, people, filterPerson, selectedMonth, o
       ) : (
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center', marginBottom: '1rem' }}>
           <input placeholder="Descrição (ex: aluguel)" value={desc} onChange={e => setDesc(e.target.value)} style={{ flex: '1 1 180px' }} />
-          <input type="number" placeholder="Valor" value={amount} onChange={e => setAmount(e.target.value)} style={{ width: 100 }} />
+          <input type="number" placeholder="Valor total" value={amount} onChange={e => setAmount(e.target.value)} style={{ width: 100 }} />
           <select value={personId} onChange={e => setPersonId(e.target.value)}>
             {people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
@@ -836,7 +843,10 @@ function OtherExpensesSection({ expenses, people, filterPerson, selectedMonth, o
       )}
       {people.length > 0 && installmentsNum > 1 && (
         <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '-0.6rem', marginBottom: '0.9rem' }}>
-          Vai gerar {installmentsNum} lançamentos de {money((Number(amount) || 0) / installmentsNum)}, um por mês a partir de {fmtDate(date)}. Ex.: financiamento de moto em {installmentsNum}x.
+          Vai gerar {installmentsNum} lançamentos de {money((Number(amount) || 0) / installmentsNum)}.{' '}
+          {Number(paidInstallments) > 0
+            ? <>{Number(paidInstallments)} já pagas (datadas antes de {fmtDate(date)}) e {installmentsNum - Number(paidInstallments)} a partir de {fmtDate(date)}, uma por mês.</>
+            : <>Uma por mês a partir de {fmtDate(date)}. Ex.: financiamento de moto em {installmentsNum}x.</>}
         </p>
       )}
 
