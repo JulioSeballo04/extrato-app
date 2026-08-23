@@ -5,7 +5,7 @@ import { Plus, Trash2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Users,
 import { useAuth } from '../context/AuthContext';
 import { getUserData, saveUserData } from '../lib/firestore';
 
-const CATEGORIES = ['Mercado', 'Lazer', 'Contas fixas', 'Transporte', 'Saúde', 'Educação', 'Assinaturas', 'Outros'];
+const CATEGORIES = ['Alimentação', 'Compras', 'Mercado', 'Lazer', 'Contas fixas', 'Transporte', 'Saúde', 'Educação', 'Assinaturas', 'Outros'];
 const DEFAULT_CATEGORY = 'Outros';
 
 // Paletas do app: cada opção é um esquema de cores completo (fundo, painéis, bordas,
