@@ -106,6 +106,14 @@ function monthsLaterDate(dateStr, n) {
   const d = new Date(y, m - 1 + n, 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
 }
+// Um lançamento "fixo" permanece valendo em todo mês a partir da data em
+// que foi criado (ex.: aluguel, assinatura), não só no mês em que foi lançado.
+function matchesMonth(item, month) {
+  if (!item?.date || !month) return false;
+  const itemMonth = item.date.slice(0, 7);
+  if (itemMonth === month) return true;
+  return !!item.fixed && itemMonth < month;
+}
 
 function seedData() {
   const p1 = uid(), p2 = uid();
@@ -187,12 +195,12 @@ export default function ExtratoApp() {
   }, [people, cards, cardTransactions, otherExpenses, paletteKey, loaded, userId]);
 
   function personTotal(personId, month) {
-    const cardSum = cardTransactions.filter(t => t.personId === personId && (!month || t.date?.slice(0, 7) === month)).reduce((s, t) => s + Number(t.amount || 0), 0);
-    const otherSum = otherExpenses.filter(t => t.personId === personId && (!month || t.date?.slice(0, 7) === month)).reduce((s, t) => s + Number(t.amount || 0), 0);
+    const cardSum = cardTransactions.filter(t => t.personId === personId && (!month || matchesMonth(t, month))).reduce((s, t) => s + Number(t.amount || 0), 0);
+    const otherSum = otherExpenses.filter(t => t.personId === personId && (!month || matchesMonth(t, month))).reduce((s, t) => s + Number(t.amount || 0), 0);
     return { cardSum, otherSum, total: cardSum + otherSum };
   }
   function cardTotal(cardId, month) {
-    return cardTransactions.filter(t => t.cardId === cardId && (!month || t.date?.slice(0, 7) === month)).reduce((s, t) => s + Number(t.amount || 0), 0);
+    return cardTransactions.filter(t => t.cardId === cardId && (!month || matchesMonth(t, month))).reduce((s, t) => s + Number(t.amount || 0), 0);
   }
   const availableMonths = Array.from(new Set([
     selectedMonth,
@@ -235,22 +243,29 @@ export default function ExtratoApp() {
     const total = Math.max(1, Math.floor(Number(tx.installments)) || 1);
     const paidCount = Math.min(total, Math.max(0, Math.floor(Number(tx.paidInstallments)) || 0));
     const groupId = uid();
-    const perInstallmentAmount = (Number(tx.amount) || 0) / total;
+    const participants = [tx.personId, ...((tx.splitWith || []).filter(id => id && id !== tx.personId))];
+    const splitGroupId = participants.length > 1 ? uid() : undefined;
+    const perPersonAmount = (Number(tx.amount) || 0) / participants.length;
+    const perInstallmentAmount = perPersonAmount / total;
     // A data informada é a da PRÓXIMA parcela a vencer (nº paidCount+1).
     // As parcelas já pagas ficam com datas retroativas; as futuras seguem em frente a partir dela.
-    const newTxs = Array.from({ length: total }, (_, i) => ({
-      id: uid(),
-      cardId,
-      personId: tx.personId,
-      description: tx.description.trim(),
-      amount: perInstallmentAmount,
-      date: monthsLaterDate(tx.date, i - paidCount),
-      category: tx.category || DEFAULT_CATEGORY,
-      installmentNumber: i + 1,
-      installmentTotal: total,
-      ...(total > 1 ? { installmentGroupId: groupId } : {}),
-      paid: i < paidCount,
-    }));
+    const newTxs = participants.flatMap(personId =>
+      Array.from({ length: total }, (_, i) => ({
+        id: uid(),
+        cardId,
+        personId,
+        description: tx.description.trim(),
+        amount: perInstallmentAmount,
+        date: monthsLaterDate(tx.date, i - paidCount),
+        fixed: !!tx.fixed,
+        category: tx.category || DEFAULT_CATEGORY,
+        installmentNumber: i + 1,
+        installmentTotal: total,
+        ...(total > 1 ? { installmentGroupId: groupId } : {}),
+        ...(splitGroupId ? { splitGroupId, splitCount: participants.length } : {}),
+        paid: i < paidCount,
+      }))
+    );
     setCardTransactions(t => [...t, ...newTxs]);
   }
   function removeCardTransaction(id) {
@@ -266,6 +281,7 @@ export default function ExtratoApp() {
       amount: Number(patch.amount) || 0,
       date: patch.date || x.date,
       personId: patch.personId || x.personId,
+      fixed: !!patch.fixed,
       category: patch.category || x.category || DEFAULT_CATEGORY,
     } : x));
   }
@@ -600,7 +616,7 @@ function CardsSection({ cards, people, cardTransactions, filterPerson, selectedM
           card={activeCard}
           people={people}
           selectedMonth={selectedMonth}
-          transactions={cardTransactions.filter(t => t.cardId === activeCard.id && t.date?.slice(0, 7) === selectedMonth && (filterPerson === 'all' || t.personId === filterPerson))}
+          transactions={cardTransactions.filter(t => t.cardId === activeCard.id && matchesMonth(t, selectedMonth) && (filterPerson === 'all' || t.personId === filterPerson))}
           onAddTx={onAddTx} onRemoveTx={onRemoveTx} onTogglePaid={onTogglePaid} onUpdateTx={onUpdateTx}
           personName={personName} personColor={personColor}
         />
@@ -615,8 +631,10 @@ function CardLedger({ card, people, transactions, selectedMonth, onAddTx, onRemo
   const [personId, setPersonId] = useState(people[0]?.id || '');
   const [date, setDate] = useState(`${selectedMonth}-01`);
   const [category, setCategory] = useState(DEFAULT_CATEGORY);
+  const [fixed, setFixed] = useState(false);
   const [installments, setInstallments] = useState('1');
   const [paidInstallments, setPaidInstallments] = useState('0');
+  const [splitWith, setSplitWith] = useState([]);
   const [editingId, setEditingId] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
 
@@ -625,19 +643,24 @@ function CardLedger({ card, people, transactions, selectedMonth, onAddTx, onRemo
   }, [people]);
 
   useEffect(() => {
+    setSplitWith(prev => prev.filter(id => id !== personId));
+  }, [personId]);
+
+  useEffect(() => {
     setDate(`${selectedMonth}-01`);
   }, [selectedMonth]);
 
   const installmentsNum = Math.max(1, Math.floor(Number(installments)) || 1);
+  const splitCount = 1 + splitWith.length;
 
   function submit() {
-    onAddTx(card.id, { description: desc, amount, personId, date, category, installments, paidInstallments });
-    setDesc(''); setAmount(''); setCategory(DEFAULT_CATEGORY); setInstallments('1'); setPaidInstallments('0');
+    onAddTx(card.id, { description: desc, amount, personId, date, category, fixed, installments, paidInstallments, splitWith });
+    setDesc(''); setAmount(''); setCategory(DEFAULT_CATEGORY); setFixed(false); setInstallments('1'); setPaidInstallments('0'); setSplitWith([]);
   }
 
   function startEdit(t) {
     setEditingId(t.id);
-    setEditDraft({ description: t.description, amount: String(t.amount), personId: t.personId, date: t.date, category: t.category || DEFAULT_CATEGORY });
+    setEditDraft({ description: t.description, amount: String(t.amount), personId: t.personId, date: t.date, fixed: !!t.fixed, category: t.category || DEFAULT_CATEGORY });
   }
   function cancelEdit() {
     setEditingId(null); setEditDraft(null);
@@ -647,11 +670,17 @@ function CardLedger({ card, people, transactions, selectedMonth, onAddTx, onRemo
     setEditingId(null); setEditDraft(null);
   }
 
+  const fixedTotal = transactions.filter(t => t.fixed && matchesMonth(t, selectedMonth)).reduce((s, t) => s + Number(t.amount || 0), 0);
   const sorted = [...transactions].sort((a, b) => (a.date < b.date ? 1 : -1));
 
   return (
     <div className="panel" style={{ marginTop: '1rem' }}>
-      <h3 style={{ margin: '0 0 0.75rem', fontSize: '0.95rem', color: 'var(--text-dim)' }}>Lançamentos · {card.name}</h3>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.75rem' }}>
+        <h3 style={{ margin: 0, fontSize: '0.95rem', color: 'var(--text-dim)' }}>Lançamentos · {card.name}</h3>
+        {fixedTotal > 0 && (
+          <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>fixos: <span className="mono" style={{ color: 'var(--text-dim)' }}>{money(fixedTotal)}</span>/mês</span>
+        )}
+      </div>
 
       {people.length === 0 ? (
         <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Cadastre uma pessoa acima para lançar gastos neste cartão.</p>
@@ -666,6 +695,10 @@ function CardLedger({ card, people, transactions, selectedMonth, onAddTx, onRemo
             {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
           <input type="date" value={date} onChange={e => setDate(e.target.value)} />
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem', color: 'var(--text-dim)', cursor: 'pointer' }}>
+            <input type="checkbox" checked={fixed} onChange={e => setFixed(e.target.checked)} style={{ width: 'auto', padding: 0 }} />
+            fixo
+          </label>
           <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.78rem', color: 'var(--text-dim)' }}>
             parcelas
             <input type="number" min="1" placeholder="1" value={installments}
@@ -680,15 +713,37 @@ function CardLedger({ card, people, transactions, selectedMonth, onAddTx, onRemo
             <input type="number" min="0" max={installmentsNum} placeholder="0" value={paidInstallments}
               onChange={e => setPaidInstallments(e.target.value)} style={{ width: 60 }} />
           </label>
+          {people.length > 1 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.78rem', color: 'var(--text-dim)', flexWrap: 'wrap' }}>
+              dividir com
+              {people.filter(p => p.id !== personId).map(p => (
+                <label key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={splitWith.includes(p.id)}
+                    onChange={e => setSplitWith(prev => e.target.checked ? [...prev, p.id] : prev.filter(id => id !== p.id))}
+                    style={{ width: 'auto', padding: 0 }}
+                  />
+                  {p.name}
+                </label>
+              ))}
+            </div>
+          )}
           <button className="primary" onClick={submit}><Plus size={14} /> Lançar</button>
         </div>
       )}
       {people.length > 0 && installmentsNum > 1 && (
         <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '-0.6rem', marginBottom: '0.9rem' }}>
-          Vai gerar {installmentsNum} lançamentos de {money((Number(amount) || 0) / installmentsNum)}.{' '}
+          Vai gerar {installmentsNum} lançamentos de {money((Number(amount) || 0) / splitCount / installmentsNum)}.{' '}
           {Number(paidInstallments) > 0
             ? <>{Number(paidInstallments)} já pagas (datadas antes de {fmtDate(date)}) e {installmentsNum - Number(paidInstallments)} a partir de {fmtDate(date)}, uma por mês.</>
             : <>Uma por mês a partir de {fmtDate(date)}.</>}
+          {splitCount > 1 && <> Dividido entre {splitCount} pessoas.</>}
+        </p>
+      )}
+      {people.length > 0 && installmentsNum === 1 && splitCount > 1 && (
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '-0.6rem', marginBottom: '0.9rem' }}>
+          Vai gerar {splitCount} lançamentos de {money((Number(amount) || 0) / splitCount)}, um pra cada pessoa.
         </p>
       )}
 
@@ -708,6 +763,10 @@ function CardLedger({ card, people, transactions, selectedMonth, onAddTx, onRemo
                   {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
                 <input type="number" value={editDraft.amount} onChange={e => setEditDraft(d => ({ ...d, amount: e.target.value }))} style={{ width: 90 }} />
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.75rem', color: 'var(--text-dim)', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={editDraft.fixed} onChange={e => setEditDraft(d => ({ ...d, fixed: e.target.checked }))} style={{ width: 'auto', padding: 0 }} />
+                  fixo
+                </label>
                 <button className="icon" onClick={() => saveEdit(t.id)} title="Salvar" style={{ color: 'var(--success)' }}><Check size={16} /></button>
                 <button className="icon" onClick={cancelEdit} title="Cancelar"><X size={16} /></button>
               </div>
@@ -721,9 +780,17 @@ function CardLedger({ card, people, transactions, selectedMonth, onAddTx, onRemo
                   <span style={{ fontSize: '0.65rem', color: 'var(--text-dim)', background: 'var(--border)', borderRadius: 4, padding: '0.1rem 0.4rem' }}>
                     {t.category || DEFAULT_CATEGORY}
                   </span>
+                  {t.fixed && (
+                    <span style={{ fontSize: '0.65rem', color: 'var(--bg)', background: 'var(--accent)', borderRadius: 4, padding: '0.1rem 0.4rem', fontWeight: 600, letterSpacing: '0.03em' }}>FIXO</span>
+                  )}
                   {t.installmentTotal > 1 && (
                     <span className="mono" style={{ fontSize: '0.65rem', color: 'var(--bg)', background: 'var(--info)', borderRadius: 4, padding: '0.1rem 0.4rem', fontWeight: 600 }}>
                       {t.installmentNumber}/{t.installmentTotal}
+                    </span>
+                  )}
+                  {t.splitGroupId && (
+                    <span title={`Dividido entre ${t.splitCount} pessoas`} style={{ fontSize: '0.65rem', color: 'var(--text-dim)', background: 'var(--border)', borderRadius: 4, padding: '0.1rem 0.4rem', fontWeight: 600, letterSpacing: '0.03em' }}>
+                      DIVIDIDO ÷{t.splitCount}
                     </span>
                   )}
                 </span>
@@ -800,9 +867,9 @@ function OtherExpensesSection({ expenses, people, filterPerson, selectedMonth, o
     setEditingId(null); setEditDraft(null);
   }
 
-  const fixedTotal = expenses.filter(e => e.fixed && e.date?.slice(0, 7) === selectedMonth).reduce((s, e) => s + Number(e.amount || 0), 0);
+  const fixedTotal = expenses.filter(e => e.fixed && matchesMonth(e, selectedMonth)).reduce((s, e) => s + Number(e.amount || 0), 0);
 
-  const filtered = expenses.filter(e => e.date?.slice(0, 7) === selectedMonth && (filterPerson === 'all' || e.personId === filterPerson) && (!onlyFixed || e.fixed))
+  const filtered = expenses.filter(e => matchesMonth(e, selectedMonth) && (filterPerson === 'all' || e.personId === filterPerson) && (!onlyFixed || e.fixed))
     .sort((a, b) => (a.date < b.date ? 1 : -1));
 
   return (
@@ -959,7 +1026,7 @@ function OtherExpensesSection({ expenses, people, filterPerson, selectedMonth, o
 
 function CategorySummarySection({ people, cardTransactions, otherExpenses, filterPerson, selectedMonth, categoryColors }) {
   const all = [...cardTransactions, ...otherExpenses].filter(t =>
-    t.date?.slice(0, 7) === selectedMonth && (filterPerson === 'all' || t.personId === filterPerson)
+    matchesMonth(t, selectedMonth) && (filterPerson === 'all' || t.personId === filterPerson)
   );
   const totals = {};
   let grandTotal = 0;
@@ -1012,10 +1079,10 @@ function ReportSection({ people, cards, cardTransactions, otherExpenses, selecte
 
   function movementsFor(personId) {
     const cardMoves = cardTransactions
-      .filter(t => t.personId === personId && t.date?.slice(0, 7) === selectedMonth)
+      .filter(t => t.personId === personId && matchesMonth(t, selectedMonth))
       .map(t => ({ ...t, source: cardName(t.cardId) }));
     const otherMoves = otherExpenses
-      .filter(t => t.personId === personId && t.date?.slice(0, 7) === selectedMonth)
+      .filter(t => t.personId === personId && matchesMonth(t, selectedMonth))
       .map(t => ({ ...t, source: t.fixed ? 'Gasto fixo' : 'Outro gasto' }));
     return [...cardMoves, ...otherMoves].sort((a, b) => (a.date < b.date ? 1 : -1));
   }
