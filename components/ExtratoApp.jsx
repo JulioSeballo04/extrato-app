@@ -130,7 +130,7 @@ function seedData() {
 
 export default function ExtratoApp() {
   const { user, logout } = useAuth();
-  const uid = user?.uid;
+  const userId = user?.uid;
 
   const [loaded, setLoaded] = useState(false);
   const [people, setPeople] = useState([]);
@@ -146,10 +146,10 @@ export default function ExtratoApp() {
   const firstLoad = useRef(true);
 
   useEffect(() => {
-    if (!uid) return;
+    if (!userId) return;
     (async () => {
       try {
-        const data = await getUserData(uid);
+        const data = await getUserData(userId);
         if (data) {
           setPeople(data.people || []);
           setCards(data.cards || []);
@@ -173,21 +173,21 @@ export default function ExtratoApp() {
         setLoaded(true);
       }
     })();
-  }, [uid]);
+  }, [userId]);
 
   useEffect(() => {
-    if (!loaded || !uid) return;
+    if (!loaded || !userId) return;
     if (firstLoad.current) { firstLoad.current = false; return; }
     const data = { people, cards, cardTransactions, otherExpenses, paletteKey };
     (async () => {
       try {
-        await saveUserData(uid, data);
+        await saveUserData(userId, data);
         setStorageError(false);
       } catch (e) {
         setStorageError(true);
       }
     })();
-  }, [people, cards, cardTransactions, otherExpenses, paletteKey, loaded, uid]);
+  }, [people, cards, cardTransactions, otherExpenses, paletteKey, loaded, userId]);
 
   function personTotal(personId, month) {
     const cardSum = cardTransactions.filter(t => t.personId === personId && (!month || t.date?.slice(0, 7) === month)).reduce((s, t) => s + Number(t.amount || 0), 0);
