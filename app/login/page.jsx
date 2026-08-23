@@ -46,10 +46,11 @@ export default function LoginPage() {
     try {
       if (mode === 'login') {
         await login(email.trim(), password);
+        router.replace('/');
       } else {
         await register(email.trim(), password);
+        router.replace('/'); // page.jsx vai mostrar a tela de "confirme seu e-mail"
       }
-      router.replace('/');
     } catch (err) {
       setError(traduzErro(err.code));
     } finally {
