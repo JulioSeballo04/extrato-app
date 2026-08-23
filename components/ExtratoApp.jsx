@@ -251,7 +251,7 @@ export default function ExtratoApp() {
       category: tx.category || DEFAULT_CATEGORY,
       installmentNumber: i + 1,
       installmentTotal: total,
-      installmentGroupId: total > 1 ? groupId : undefined,
+      ...(total > 1 ? { installmentGroupId: groupId } : {}),
       paid: i < paidCount,
     }));
     setCardTransactions(t => [...t, ...newTxs]);
@@ -290,7 +290,7 @@ export default function ExtratoApp() {
       category: exp.category || DEFAULT_CATEGORY,
       installmentNumber: i + 1,
       installmentTotal: total,
-      installmentGroupId: total > 1 ? groupId : undefined,
+      ...(total > 1 ? { installmentGroupId: groupId } : {}),
       paid: i < paidCount,
     }));
     setOtherExpenses(t => [...t, ...newExpenses]);
