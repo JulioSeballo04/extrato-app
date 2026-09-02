@@ -88,7 +88,6 @@ export default function LoginPage() {
       }}
     >
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap');
         .login-card * { box-sizing: border-box; font-family: 'Inter', sans-serif; }
         .login-card .display { font-family: 'Fraunces', serif; }
         .login-card input {
@@ -97,6 +96,13 @@ export default function LoginPage() {
           transition: border-color 0.15s;
         }
         .login-card input:focus { border-color: #C9A227; }
+        .login-card input:-webkit-autofill,
+        .login-card input:-webkit-autofill:hover,
+        .login-card input:-webkit-autofill:focus {
+          -webkit-text-fill-color: #EDEDEF;
+          -webkit-box-shadow: 0 0 0 1000px #1F232C inset;
+          transition: background-color 5000s ease-in-out 0s;
+        }
         .login-card button.primary {
           width: 100%; background: #C9A227; color: #0F1115; border: none; border-radius: 8px;
           padding: 0.7rem; font-weight: 600; font-size: 0.9rem; cursor: pointer; transition: filter 0.15s;
@@ -133,7 +139,7 @@ export default function LoginPage() {
         }}
       >
         <div className="display" style={{ fontSize: '1.5rem', marginBottom: '0.25rem' }}>
-          Extrato
+          Gestor de Gastos
         </div>
         <div style={{ color: '#6B7280', fontSize: '0.85rem', marginBottom: '1.75rem' }}>
           {mode === 'login' ? 'Entre para ver suas contas' : 'Crie sua conta para começar'}

@@ -48,9 +48,12 @@ export default function Home() {
           <div style={{ color: '#EDEDEF', fontWeight: 600, fontSize: '1.1rem', marginBottom: '0.5rem' }}>
             Confirme seu e-mail
           </div>
-          <div style={{ fontSize: '0.85rem', marginBottom: '1.25rem' }}>
+          <div style={{ fontSize: '0.85rem', marginBottom: '0.75rem' }}>
             Enviamos um link de confirmação para <strong style={{ color: '#EDEDEF' }}>{user.email}</strong>.
             Clique nele e depois volte aqui.
+          </div>
+          <div style={{ fontSize: '0.78rem', color: '#6B7280', marginBottom: '1.25rem' }}>
+            Não encontrou o e-mail? Dá uma olhada na caixa de spam ou lixo eletrônico.
           </div>
           <button
             onClick={async () => {

@@ -2,7 +2,7 @@ import { AuthProvider } from '../context/AuthContext';
 import './globals.css';
 
 export const metadata = {
-  title: 'Extrato — gestão de contas compartilhadas',
+  title: 'Gestor de Gastos — contas e cartões compartilhados',
   description: 'Controle de gastos e cartões compartilhados entre pessoas',
 };
 

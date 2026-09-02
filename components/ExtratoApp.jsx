@@ -102,9 +102,15 @@ function shiftMonth(ym, delta) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 function monthsLaterDate(dateStr, n) {
-  const [y, m] = dateStr.split('-').map(Number);
-  const d = new Date(y, m - 1 + n, 1);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+  const [y, m, day] = dateStr.split('-').map(Number);
+  const targetMonth = m - 1 + n;
+  // Preserva o dia original (ex.: parcela sempre no dia 10), mas o limita
+  // ao último dia do mês de destino quando ele for mais curto (ex.: dia 31
+  // não vira dia 3 do mês seguinte, vira o último dia daquele mês).
+  const daysInTargetMonth = new Date(y, targetMonth + 1, 0).getDate();
+  const clampedDay = Math.min(day || 1, daysInTargetMonth);
+  const d = new Date(y, targetMonth, clampedDay);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 // Um lançamento "fixo" permanece valendo em todo mês a partir da data em
 // que foi criado (ex.: aluguel, assinatura), não só no mês em que foi lançado.
@@ -357,7 +363,6 @@ export default function ExtratoApp() {
       '--success': pal.success, '--success-bg': pal.successBg, '--danger': pal.danger, '--danger-bg': pal.dangerBg, '--info': pal.info,
     }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
         .extrato-app * { box-sizing: border-box; }
         .extrato-app .display { font-family: 'Fraunces', serif; }
         .extrato-app .mono { font-family: 'IBM Plex Mono', monospace; }
@@ -367,6 +372,21 @@ export default function ExtratoApp() {
           outline: none; transition: border-color 0.15s;
         }
         .extrato-app input:focus, .extrato-app select:focus { border-color: var(--accent); }
+        .extrato-app input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.8); cursor: pointer; }
+        .extrato-app input[type="number"] { -moz-appearance: textfield; }
+        .extrato-app input[type="number"]::-webkit-outer-spin-button,
+        .extrato-app input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+        .extrato-app input:-webkit-autofill,
+        .extrato-app input:-webkit-autofill:hover,
+        .extrato-app input:-webkit-autofill:focus {
+          -webkit-text-fill-color: var(--text);
+          -webkit-box-shadow: 0 0 0 1000px var(--input-bg) inset;
+          transition: background-color 5000s ease-in-out 0s;
+        }
+        .extrato-app ::-webkit-scrollbar { height: 8px; width: 8px; }
+        .extrato-app ::-webkit-scrollbar-track { background: transparent; }
+        .extrato-app ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; }
+        .extrato-app ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
         .extrato-app button.primary {
           background: var(--accent); color: var(--bg); border: none; border-radius: 8px;
           padding: 0.5rem 0.9rem; font-weight: 600; font-size: 0.875rem; cursor: pointer;
@@ -409,7 +429,7 @@ export default function ExtratoApp() {
       <header style={{ padding: '2.5rem 1.5rem 1.5rem', maxWidth: 1040, margin: '0 auto' }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.75rem', flexWrap: 'wrap', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.75rem', flexWrap: 'wrap' }}>
-            <h1 className="display" style={{ fontSize: '2.1rem', fontWeight: 700, margin: 0, letterSpacing: '-0.01em' }}>Extrato</h1>
+            <h1 className="display" style={{ fontSize: '2.1rem', fontWeight: 700, margin: 0, letterSpacing: '-0.01em' }}>Gestor de Gastos</h1>
             <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>gestão de contas compartilhadas</span>
           </div>
           <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
