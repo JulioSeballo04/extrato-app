@@ -793,12 +793,31 @@ function CardLedger({ card, people, transactions, selectedMonth, onAddTx, onRemo
                 <button className="icon" onClick={cancelEdit} title="Cancelar"><X size={16} /></button>
               </div>
             ) : (
-              <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.85rem', padding: '0.35rem 0', borderBottom: '1px solid var(--border)', flexWrap: 'wrap' }}>
-                <span className="mono" style={{ color: 'var(--text-muted)', width: 60 }}>{fmtDate(t.date)}</span>
-                <span style={{ width: 8, height: 8, borderRadius: '50%', background: personColor(t.personId), flexShrink: 0 }} />
-                <span style={{ color: 'var(--text-dim)', width: 100, flexShrink: 0 }}>{personName(t.personId)}</span>
-                <span style={{ flex: 1, minWidth: 100, display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
-                  {t.description}
+              <div key={t.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', fontSize: '0.85rem', padding: '0.45rem 0', borderBottom: '1px solid var(--border)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <span className="mono" style={{ color: 'var(--text-muted)' }}>{fmtDate(t.date)}</span>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: personColor(t.personId), flexShrink: 0 }} />
+                  <span style={{ color: 'var(--text-dim)' }}>{personName(t.personId)}</span>
+                  <span style={{ flex: 1 }} />
+                  {t.installmentTotal > 1 && (
+                    <button
+                      onClick={() => onTogglePaid(t.id)}
+                      style={{
+                        fontSize: '0.65rem', fontWeight: 600, letterSpacing: '0.03em', border: 'none', borderRadius: 4,
+                        padding: '0.15rem 0.45rem', cursor: 'pointer',
+                        background: t.paid ? 'var(--success-bg)' : 'var(--danger-bg)', color: t.paid ? 'var(--success)' : 'var(--danger)',
+                      }}
+                      title="Clique para alternar pago/pendente"
+                    >
+                      {t.paid ? 'PAGA' : 'PENDENTE'}
+                    </button>
+                  )}
+                  <span className="mono" style={{ fontWeight: 600 }}>{money(t.amount)}</span>
+                  <button className="icon" onClick={() => startEdit(t)} title="Editar"><Pencil size={14} /></button>
+                  <button className="icon" onClick={() => onRemoveTx(t.id)}><Trash2 size={14} /></button>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                  <span style={{ flex: '1 1 auto', minWidth: 80 }}>{t.description}</span>
                   <span style={{ fontSize: '0.65rem', color: 'var(--text-dim)', background: 'var(--border)', borderRadius: 4, padding: '0.1rem 0.4rem' }}>
                     {t.category || DEFAULT_CATEGORY}
                   </span>
@@ -815,23 +834,7 @@ function CardLedger({ card, people, transactions, selectedMonth, onAddTx, onRemo
                       DIVIDIDO ÷{t.splitCount}
                     </span>
                   )}
-                </span>
-                <span className="mono" style={{ fontWeight: 600 }}>{money(t.amount)}</span>
-                {t.installmentTotal > 1 && (
-                  <button
-                    onClick={() => onTogglePaid(t.id)}
-                    style={{
-                      fontSize: '0.65rem', fontWeight: 600, letterSpacing: '0.03em', border: 'none', borderRadius: 4,
-                      padding: '0.15rem 0.45rem', cursor: 'pointer',
-                      background: t.paid ? 'var(--success-bg)' : 'var(--danger-bg)', color: t.paid ? 'var(--success)' : 'var(--danger)',
-                    }}
-                    title="Clique para alternar pago/pendente"
-                  >
-                    {t.paid ? 'PAGA' : 'PENDENTE'}
-                  </button>
-                )}
-                <button className="icon" onClick={() => startEdit(t)} title="Editar"><Pencil size={14} /></button>
-                <button className="icon" onClick={() => onRemoveTx(t.id)}><Trash2 size={14} /></button>
+                </div>
               </div>
             )
           ))}
@@ -998,12 +1001,31 @@ function OtherExpensesSection({ expenses, people, filterPerson, selectedMonth, o
                 <button className="icon" onClick={cancelEdit} title="Cancelar"><X size={16} /></button>
               </div>
             ) : (
-              <div key={e.id} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.85rem', padding: '0.35rem 0', borderBottom: '1px solid var(--border)', flexWrap: 'wrap' }}>
-                <span className="mono" style={{ color: 'var(--text-muted)', width: 60 }}>{fmtDate(e.date)}</span>
-                <span style={{ width: 8, height: 8, borderRadius: '50%', background: personColor(e.personId), flexShrink: 0 }} />
-                <span style={{ color: 'var(--text-dim)', width: 100, flexShrink: 0 }}>{personName(e.personId)}</span>
-                <span style={{ flex: 1, minWidth: 100, display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
-                  {e.description}
+              <div key={e.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', fontSize: '0.85rem', padding: '0.45rem 0', borderBottom: '1px solid var(--border)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <span className="mono" style={{ color: 'var(--text-muted)' }}>{fmtDate(e.date)}</span>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: personColor(e.personId), flexShrink: 0 }} />
+                  <span style={{ color: 'var(--text-dim)' }}>{personName(e.personId)}</span>
+                  <span style={{ flex: 1 }} />
+                  {e.installmentTotal > 1 && (
+                    <button
+                      onClick={() => onTogglePaid(e.id)}
+                      style={{
+                        fontSize: '0.65rem', fontWeight: 600, letterSpacing: '0.03em', border: 'none', borderRadius: 4,
+                        padding: '0.15rem 0.45rem', cursor: 'pointer',
+                        background: e.paid ? 'var(--success-bg)' : 'var(--danger-bg)', color: e.paid ? 'var(--success)' : 'var(--danger)',
+                      }}
+                      title="Clique para alternar pago/pendente"
+                    >
+                      {e.paid ? 'PAGA' : 'PENDENTE'}
+                    </button>
+                  )}
+                  <span className="mono" style={{ fontWeight: 600 }}>{money(e.amount)}</span>
+                  <button className="icon" onClick={() => startEdit(e)} title="Editar"><Pencil size={14} /></button>
+                  <button className="icon" onClick={() => onRemove(e.id)}><Trash2 size={14} /></button>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                  <span style={{ flex: '1 1 auto', minWidth: 80 }}>{e.description}</span>
                   <span style={{ fontSize: '0.65rem', color: 'var(--text-dim)', background: 'var(--border)', borderRadius: 4, padding: '0.1rem 0.4rem' }}>
                     {e.category || DEFAULT_CATEGORY}
                   </span>
@@ -1020,23 +1042,7 @@ function OtherExpensesSection({ expenses, people, filterPerson, selectedMonth, o
                       DIVIDIDO ÷{e.splitCount}
                     </span>
                   )}
-                </span>
-                <span className="mono" style={{ fontWeight: 600 }}>{money(e.amount)}</span>
-                {e.installmentTotal > 1 && (
-                  <button
-                    onClick={() => onTogglePaid(e.id)}
-                    style={{
-                      fontSize: '0.65rem', fontWeight: 600, letterSpacing: '0.03em', border: 'none', borderRadius: 4,
-                      padding: '0.15rem 0.45rem', cursor: 'pointer',
-                      background: e.paid ? 'var(--success-bg)' : 'var(--danger-bg)', color: e.paid ? 'var(--success)' : 'var(--danger)',
-                    }}
-                    title="Clique para alternar pago/pendente"
-                  >
-                    {e.paid ? 'PAGA' : 'PENDENTE'}
-                  </button>
-                )}
-                <button className="icon" onClick={() => startEdit(e)} title="Editar"><Pencil size={14} /></button>
-                <button className="icon" onClick={() => onRemove(e.id)}><Trash2 size={14} /></button>
+                </div>
               </div>
             )
           ))}
