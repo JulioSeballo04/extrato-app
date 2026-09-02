@@ -405,7 +405,7 @@ export default function ExtratoApp() {
         .extrato-app button.icon:hover { color: var(--danger); }
         .extrato-app .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 1.25rem; }
         .extrato-app .credit-card { border-radius: 18px; padding: 1.1rem 1.3rem; position: relative; overflow: hidden; cursor: pointer;
-          transition: transform 0.2s ease; min-width: 250px; }
+          transition: transform 0.2s ease; }
         .extrato-app .credit-card:hover { transform: translateY(-3px); }
         .extrato-app .bank-mono {
           width: 34px; height: 34px; border-radius: 9px; display: flex; align-items: center; justify-content: center;
@@ -426,7 +426,7 @@ export default function ExtratoApp() {
         }
       `}</style>
 
-      <header style={{ padding: '2.5rem 1.5rem 1.5rem', maxWidth: 1040, margin: '0 auto' }}>
+      <header style={{ padding: '2.5rem 1.5rem 1.5rem', maxWidth: 1180, margin: '0 auto' }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.75rem', flexWrap: 'wrap', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.75rem', flexWrap: 'wrap' }}>
             <h1 className="display" style={{ fontSize: '2.1rem', fontWeight: 700, margin: 0, letterSpacing: '-0.01em' }}>Gestor de Gastos</h1>
@@ -464,7 +464,7 @@ export default function ExtratoApp() {
         )}
       </header>
 
-      <main style={{ maxWidth: 1040, margin: '0 auto', padding: '0 1.5rem', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+      <main style={{ maxWidth: 1180, margin: '0 auto', padding: '0 1.5rem', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
         <PeopleSection people={people} onAdd={addPerson} onRemove={removePerson} onSalary={updateSalary} personColor={personColor} />
 
         <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
@@ -490,12 +490,14 @@ export default function ExtratoApp() {
           personName={personName} personColor={personColor}
         />
 
-        <CategorySummarySection
-          people={people} cardTransactions={cardTransactions} otherExpenses={otherExpenses}
-          filterPerson={filterPerson} selectedMonth={selectedMonth} categoryColors={pal.people}
-        />
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '2rem', alignItems: 'start' }}>
+          <CategorySummarySection
+            people={people} cardTransactions={cardTransactions} otherExpenses={otherExpenses}
+            filterPerson={filterPerson} selectedMonth={selectedMonth} categoryColors={pal.people}
+          />
 
-        <SummarySection people={people} personTotal={personTotal} personColor={personColor} selectedMonth={selectedMonth} />
+          <SummarySection people={people} personTotal={personTotal} personColor={personColor} selectedMonth={selectedMonth} />
+        </div>
 
         <ReportSection
           people={people} cards={cards} cardTransactions={cardTransactions} otherExpenses={otherExpenses}
@@ -589,7 +591,7 @@ function CardsSection({ cards, people, cardTransactions, filterPerson, selectedM
       {cards.length === 0 ? (
         <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Nenhum cartão cadastrado. Adicione o primeiro para começar a lançar gastos.</p>
       ) : (
-        <div style={{ display: 'flex', gap: '1rem', overflowX: 'auto', paddingBottom: '0.5rem' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: '1rem' }}>
           {cards.map((c, i) => {
             const bankInfo = c.bank && BANKS[c.bank];
             const [ca, cb] = bankInfo ? bankInfo.gradient : cardGradients[i % cardGradients.length];
@@ -598,7 +600,7 @@ function CardsSection({ cards, people, cardTransactions, filterPerson, selectedM
             const pct = c.limitValue > 0 ? Math.min(100, (used / c.limitValue) * 100) : 0;
             return (
               <div key={c.id} className="credit-card" onClick={() => setExpandedCard(expandedCard === c.id ? null : c.id)}
-                style={{ background: `linear-gradient(135deg, ${ca}, ${cb})`, flex: '0 0 auto' }}>
+                style={{ background: `linear-gradient(135deg, ${ca}, ${cb})` }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                     <div style={{ width: 30, height: 22, borderRadius: 5, background: chipColor ? `linear-gradient(135deg, ${chipColor}, #ffffffaa)` : 'linear-gradient(135deg,var(--accent-light),var(--accent))' }} />
