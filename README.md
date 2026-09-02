@@ -8,7 +8,9 @@ próprios dados.
 
 1. Acesse https://console.firebase.google.com e crie um novo projeto.
 2. No menu lateral, vá em **Build > Authentication > Sign-in method** e
-   ative o provedor **E-mail/senha**.
+   ative os provedores **E-mail/senha** e **Google**. Para o Google, basta
+   escolher um e-mail de suporte do projeto e salvar — não precisa de mais
+   nada para funcionar em `localhost`.
 3. Vá em **Build > Firestore Database** e clique em **Criar banco de
    dados**. Escolha o modo **produção** (as regras de segurança do
    projeto já cuidam do acesso) e a região mais próxima de você.

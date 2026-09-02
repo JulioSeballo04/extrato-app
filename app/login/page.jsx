@@ -14,12 +14,14 @@ function traduzErro(code) {
     'auth/weak-password': 'A senha precisa ter pelo menos 6 caracteres.',
     'auth/too-many-requests': 'Muitas tentativas. Aguarde um pouco e tente de novo.',
     'auth/missing-password': 'Digite uma senha.',
+    'auth/popup-closed-by-user': 'Janela do Google fechada antes de concluir o login.',
+    'auth/account-exists-with-different-credential': 'Já existe uma conta com esse e-mail usando outro método de login.',
   };
   return mapa[code] || 'Não foi possível entrar. Tente novamente.';
 }
 
 export default function LoginPage() {
-  const { user, loading, login, register } = useAuth();
+  const { user, loading, login, loginWithGoogle, register } = useAuth();
   const router = useRouter();
 
   const [mode, setMode] = useState('login'); // 'login' | 'cadastro'
@@ -28,6 +30,7 @@ export default function LoginPage() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [googleSubmitting, setGoogleSubmitting] = useState(false);
 
   useEffect(() => {
     if (!loading && user) router.replace('/');
@@ -55,6 +58,19 @@ export default function LoginPage() {
       setError(traduzErro(err.code));
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleGoogle() {
+    setError('');
+    setGoogleSubmitting(true);
+    try {
+      await loginWithGoogle();
+      router.replace('/');
+    } catch (err) {
+      if (err.code !== 'auth/popup-closed-by-user') setError(traduzErro(err.code));
+    } finally {
+      setGoogleSubmitting(false);
     }
   }
 
@@ -89,6 +105,19 @@ export default function LoginPage() {
         .login-card button.primary:disabled { opacity: 0.6; cursor: default; }
         .login-card button.link {
           background: none; border: none; color: #C9A227; font-size: 0.85rem; cursor: pointer; padding: 0;
+        }
+        .login-card button.google {
+          width: 100%; background: #1F232C; color: #EDEDEF; border: 1px solid #2A2F3A; border-radius: 8px;
+          padding: 0.65rem; font-weight: 500; font-size: 0.9rem; cursor: pointer; transition: border-color 0.15s;
+          display: flex; align-items: center; justify-content: center; gap: 0.6rem;
+        }
+        .login-card button.google:hover { border-color: #6B7280; }
+        .login-card button.google:disabled { opacity: 0.6; cursor: default; }
+        .login-card .divider {
+          display: flex; align-items: center; gap: 0.75rem; color: #6B7280; font-size: 0.78rem; margin: 1.1rem 0;
+        }
+        .login-card .divider::before, .login-card .divider::after {
+          content: ''; flex: 1; height: 1px; background: #22262F;
         }
       `}</style>
 
@@ -159,6 +188,18 @@ export default function LoginPage() {
             {submitting ? 'Aguarde…' : mode === 'login' ? 'Entrar' : 'Criar conta'}
           </button>
         </form>
+
+        <div className="divider">ou</div>
+
+        <button className="google" type="button" onClick={handleGoogle} disabled={googleSubmitting}>
+          <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
+            <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+            <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.9-2.26 5.36-4.78 7.02l7.73 6c4.51-4.18 7.09-10.36 7.09-17.49z" />
+            <path fill="#FBBC05" d="M10.53 28.59A14.5 14.5 0 0 1 9.5 24c0-1.59.27-3.13.76-4.59l-7.98-6.19A23.94 23.94 0 0 0 0 24c0 3.87.92 7.53 2.56 10.78l7.97-6.19z" />
+            <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.97 6.19C6.51 42.62 14.62 48 24 48z" />
+          </svg>
+          {googleSubmitting ? 'Aguarde…' : 'Entrar com Google'}
+        </button>
 
         <div style={{ marginTop: '1.5rem', fontSize: '0.85rem', color: '#6B7280', textAlign: 'center' }}>
           {mode === 'login' ? (

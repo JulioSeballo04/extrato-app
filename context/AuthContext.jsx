@@ -5,6 +5,9 @@ import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  signInWithPopup,
+  signInWithRedirect,
+  GoogleAuthProvider,
   sendEmailVerification,
   signOut,
   reload,
@@ -27,6 +30,20 @@ export function AuthProvider({ children }) {
 
   function login(email, password) {
     return signInWithEmailAndPassword(auth, email, password);
+  }
+
+  // Alguns navegadores (Safari, in-app browsers, bloqueadores de pop-up)
+  // impedem o signInWithPopup; nesses casos caímos para o fluxo de redirect.
+  async function loginWithGoogle() {
+    const provider = new GoogleAuthProvider();
+    try {
+      return await signInWithPopup(auth, provider);
+    } catch (err) {
+      if (err.code === 'auth/popup-blocked' || err.code === 'auth/operation-not-supported-in-this-environment') {
+        return signInWithRedirect(auth, provider);
+      }
+      throw err;
+    }
   }
 
   async function register(email, password) {
@@ -55,7 +72,7 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, loading, login, register, logout, resendVerificationEmail, refreshUser }}
+      value={{ user, loading, login, loginWithGoogle, register, logout, resendVerificationEmail, refreshUser }}
     >
       {children}
     </AuthContext.Provider>

@@ -145,7 +145,6 @@ export default function ExtratoApp() {
   const [cards, setCards] = useState([]);
   const [cardTransactions, setCardTransactions] = useState([]);
   const [otherExpenses, setOtherExpenses] = useState([]);
-  const [vales, setVales] = useState([]);
   const [filterPerson, setFilterPerson] = useState('all');
   const [selectedMonth, setSelectedMonth] = useState(currentMonth());
   const [expandedCard, setExpandedCard] = useState(null);
@@ -164,7 +163,6 @@ export default function ExtratoApp() {
           setCards(data.cards || []);
           setCardTransactions(data.cardTransactions || []);
           setOtherExpenses(data.otherExpenses || []);
-          setVales(data.vales || []);
           if (data.paletteKey && PALETTES[data.paletteKey]) setPaletteKey(data.paletteKey);
         } else {
           const seed = seedData();
@@ -185,7 +183,7 @@ export default function ExtratoApp() {
   useEffect(() => {
     if (!loaded || !userId) return;
     if (firstLoad.current) { firstLoad.current = false; return; }
-    const data = { people, cards, cardTransactions, otherExpenses, vales, paletteKey };
+    const data = { people, cards, cardTransactions, otherExpenses, paletteKey };
     (async () => {
       try {
         await saveUserData(userId, data);
@@ -194,7 +192,7 @@ export default function ExtratoApp() {
         setStorageError(true);
       }
     })();
-  }, [people, cards, cardTransactions, otherExpenses, vales, paletteKey, loaded, userId]);
+  }, [people, cards, cardTransactions, otherExpenses, paletteKey, loaded, userId]);
 
   function personTotal(personId, month) {
     const cardSum = cardTransactions.filter(t => t.personId === personId && (!month || matchesMonth(t, month))).reduce((s, t) => s + Number(t.amount || 0), 0);
@@ -276,9 +274,6 @@ export default function ExtratoApp() {
   function toggleCardTransactionPaid(id) {
     setCardTransactions(t => t.map(x => x.id === id ? { ...x, paid: !x.paid } : x));
   }
-  function toggleCardTransactionVale(id) {
-    setCardTransactions(t => t.map(x => x.id === id ? { ...x, paidWithVale: !x.paidWithVale } : x));
-  }
   function updateCardTransaction(id, patch) {
     setCardTransactions(t => t.map(x => x.id === id ? {
       ...x,
@@ -327,9 +322,6 @@ export default function ExtratoApp() {
   function toggleOtherExpensePaid(id) {
     setOtherExpenses(t => t.map(x => x.id === id ? { ...x, paid: !x.paid } : x));
   }
-  function toggleOtherExpenseVale(id) {
-    setOtherExpenses(t => t.map(x => x.id === id ? { ...x, paidWithVale: !x.paidWithVale } : x));
-  }
   function updateOtherExpense(id, patch) {
     setOtherExpenses(t => t.map(x => x.id === id ? {
       ...x,
@@ -342,21 +334,8 @@ export default function ExtratoApp() {
     } : x));
   }
   function clearAll() {
-    setPeople([]); setCards([]); setCardTransactions([]); setOtherExpenses([]); setVales([]);
+    setPeople([]); setCards([]); setCardTransactions([]); setOtherExpenses([]);
     setConfirmClear(false);
-  }
-  // Vale: quanto cada pessoa recebeu de vale (alimentação/refeição/etc.)
-  // em um determinado mês. Um registro por pessoa+mês; salvar de novo
-  // no mesmo mês atualiza o valor em vez de duplicar.
-  function setValeAmount(personId, month, amount) {
-    setVales(v => {
-      const existing = v.find(x => x.personId === personId && x.month === month);
-      const value = Number(amount) || 0;
-      if (existing) {
-        return v.map(x => x.id === existing.id ? { ...x, amount: value } : x);
-      }
-      return [...v, { id: uid(), personId, month, amount: value }];
-    });
   }
 
   const pal = PALETTES[paletteKey] || PALETTES[DEFAULT_PALETTE];
@@ -482,14 +461,12 @@ export default function ExtratoApp() {
           filterPerson={filterPerson} selectedMonth={selectedMonth} expandedCard={expandedCard} setExpandedCard={setExpandedCard}
           onAddCard={addCard} onRemoveCard={removeCard}
           onAddTx={addCardTransaction} onRemoveTx={removeCardTransaction} onTogglePaid={toggleCardTransactionPaid} onUpdateTx={updateCardTransaction}
-          onToggleVale={toggleCardTransactionVale}
           cardTotal={cardTotal} personName={personName} personColor={personColor} cardGradients={pal.cardGradients}
         />
 
         <OtherExpensesSection
           expenses={otherExpenses} people={people} filterPerson={filterPerson} selectedMonth={selectedMonth}
           onAdd={addOtherExpense} onRemove={removeOtherExpense} onUpdate={updateOtherExpense} onTogglePaid={toggleOtherExpensePaid}
-          onToggleVale={toggleOtherExpenseVale}
           personName={personName} personColor={personColor}
         />
 
@@ -503,11 +480,6 @@ export default function ExtratoApp() {
         <ReportSection
           people={people} cards={cards} cardTransactions={cardTransactions} otherExpenses={otherExpenses}
           selectedMonth={selectedMonth} personTotal={personTotal} personColor={personColor}
-        />
-
-        <ValeSection
-          people={people} vales={vales} cardTransactions={cardTransactions} otherExpenses={otherExpenses}
-          filterPerson={filterPerson} selectedMonth={selectedMonth} onSetVale={setValeAmount} personColor={personColor}
         />
       </main>
     </div>
@@ -560,7 +532,7 @@ function PeopleSection({ people, onAdd, onRemove, onSalary, personColor }) {
   );
 }
 
-function CardsSection({ cards, people, cardTransactions, filterPerson, selectedMonth, expandedCard, setExpandedCard, onAddCard, onRemoveCard, onAddTx, onRemoveTx, onTogglePaid, onUpdateTx, onToggleVale, cardTotal, personName, personColor, cardGradients }) {
+function CardsSection({ cards, people, cardTransactions, filterPerson, selectedMonth, expandedCard, setExpandedCard, onAddCard, onRemoveCard, onAddTx, onRemoveTx, onTogglePaid, onUpdateTx, cardTotal, personName, personColor, cardGradients }) {
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState('');
   const [limitValue, setLimitValue] = useState('');
@@ -645,7 +617,7 @@ function CardsSection({ cards, people, cardTransactions, filterPerson, selectedM
           people={people}
           selectedMonth={selectedMonth}
           transactions={cardTransactions.filter(t => t.cardId === activeCard.id && matchesMonth(t, selectedMonth) && (filterPerson === 'all' || t.personId === filterPerson))}
-          onAddTx={onAddTx} onRemoveTx={onRemoveTx} onTogglePaid={onTogglePaid} onUpdateTx={onUpdateTx} onToggleVale={onToggleVale}
+          onAddTx={onAddTx} onRemoveTx={onRemoveTx} onTogglePaid={onTogglePaid} onUpdateTx={onUpdateTx}
           personName={personName} personColor={personColor}
         />
       )}
@@ -653,7 +625,7 @@ function CardsSection({ cards, people, cardTransactions, filterPerson, selectedM
   );
 }
 
-function CardLedger({ card, people, transactions, selectedMonth, onAddTx, onRemoveTx, onTogglePaid, onUpdateTx, onToggleVale, personName, personColor }) {
+function CardLedger({ card, people, transactions, selectedMonth, onAddTx, onRemoveTx, onTogglePaid, onUpdateTx, personName, personColor }) {
   const [desc, setDesc] = useState('');
   const [amount, setAmount] = useState('');
   const [personId, setPersonId] = useState(people[0]?.id || '');
@@ -836,17 +808,6 @@ function CardLedger({ card, people, transactions, selectedMonth, onAddTx, onRemo
                     {t.paid ? 'PAGA' : 'PENDENTE'}
                   </button>
                 )}
-                <button
-                  onClick={() => onToggleVale(t.id)}
-                  style={{
-                    fontSize: '0.65rem', fontWeight: 600, letterSpacing: '0.03em', border: '1px solid var(--border)', borderRadius: 4,
-                    padding: '0.15rem 0.45rem', cursor: 'pointer',
-                    background: t.paidWithVale ? 'var(--accent)' : 'transparent', color: t.paidWithVale ? 'var(--bg)' : 'var(--text-dim)',
-                  }}
-                  title="Marcar como pago com o vale"
-                >
-                  VALE
-                </button>
                 <button className="icon" onClick={() => startEdit(t)} title="Editar"><Pencil size={14} /></button>
                 <button className="icon" onClick={() => onRemoveTx(t.id)}><Trash2 size={14} /></button>
               </div>
@@ -858,7 +819,7 @@ function CardLedger({ card, people, transactions, selectedMonth, onAddTx, onRemo
   );
 }
 
-function OtherExpensesSection({ expenses, people, filterPerson, selectedMonth, onAdd, onRemove, onUpdate, onTogglePaid, onToggleVale, personName, personColor }) {
+function OtherExpensesSection({ expenses, people, filterPerson, selectedMonth, onAdd, onRemove, onUpdate, onTogglePaid, personName, personColor }) {
   const [desc, setDesc] = useState('');
   const [amount, setAmount] = useState('');
   const [personId, setPersonId] = useState(people[0]?.id || '');
@@ -1052,17 +1013,6 @@ function OtherExpensesSection({ expenses, people, filterPerson, selectedMonth, o
                     {e.paid ? 'PAGA' : 'PENDENTE'}
                   </button>
                 )}
-                <button
-                  onClick={() => onToggleVale(e.id)}
-                  style={{
-                    fontSize: '0.65rem', fontWeight: 600, letterSpacing: '0.03em', border: '1px solid var(--border)', borderRadius: 4,
-                    padding: '0.15rem 0.45rem', cursor: 'pointer',
-                    background: e.paidWithVale ? 'var(--accent)' : 'transparent', color: e.paidWithVale ? 'var(--bg)' : 'var(--text-dim)',
-                  }}
-                  title="Marcar como pago com o vale"
-                >
-                  VALE
-                </button>
                 <button className="icon" onClick={() => startEdit(e)} title="Editar"><Pencil size={14} /></button>
                 <button className="icon" onClick={() => onRemove(e.id)}><Trash2 size={14} /></button>
               </div>
@@ -1255,95 +1205,6 @@ function SummarySection({ people, personTotal, personColor, selectedMonth }) {
           })}
         </div>
       )}
-    </section>
-  );
-}
-
-function ValeSection({ people, vales, cardTransactions, otherExpenses, filterPerson, selectedMonth, onSetVale, personColor }) {
-  const [drafts, setDrafts] = useState({});
-
-  const targets = filterPerson === 'all' ? people : people.filter(p => p.id === filterPerson);
-
-  function valeFor(personId) {
-    return vales.find(v => v.personId === personId && v.month === selectedMonth)?.amount || 0;
-  }
-  function draftFor(personId) {
-    const key = `${personId}-${selectedMonth}`;
-    return drafts[key] !== undefined ? drafts[key] : String(valeFor(personId) || '');
-  }
-  function setDraft(personId, value) {
-    setDrafts(d => ({ ...d, [`${personId}-${selectedMonth}`]: value }));
-  }
-  function saveDraft(personId) {
-    onSetVale(personId, selectedMonth, draftFor(personId));
-  }
-
-  if (people.length === 0) {
-    return (
-      <section className="panel">
-        <h2 className="display" style={{ fontSize: '1.15rem', margin: '0 0 1rem' }}>Vale</h2>
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Cadastre pessoas para controlar o vale.</p>
-      </section>
-    );
-  }
-
-  return (
-    <section className="panel">
-      <h2 className="display" style={{ fontSize: '1.15rem', margin: '0 0 0.35rem' }}>Vale</h2>
-      <p style={{ color: 'var(--text-muted)', fontSize: '0.78rem', margin: '0 0 1rem' }}>
-        Informe quanto recebeu de vale no mês e marque, nos lançamentos de Cartões e Outros gastos, quais já foram pagos com ele (botão "VALE").
-      </p>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-        {targets.map(p => {
-          const recebido = valeFor(p.id);
-          const usado = [...cardTransactions, ...otherExpenses]
-            .filter(t => t.personId === p.id && t.paidWithVale && matchesMonth(t, selectedMonth))
-            .reduce((s, t) => s + Number(t.amount || 0), 0);
-          const totalContas = [...cardTransactions, ...otherExpenses]
-            .filter(t => t.personId === p.id && matchesMonth(t, selectedMonth))
-            .reduce((s, t) => s + Number(t.amount || 0), 0);
-          const saldoVale = recebido - usado;
-          const faltaPagar = totalContas - usado;
-          return (
-            <div key={p.id} style={{ borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.6rem', flexWrap: 'wrap' }}>
-                <span style={{ width: 10, height: 10, borderRadius: '50%', background: personColor(p.id) }} />
-                <span style={{ fontWeight: 500 }}>{p.name}</span>
-                <span style={{ flex: 1 }} />
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.78rem', color: 'var(--text-dim)' }}>
-                  vale recebido em {monthLabel(selectedMonth)}
-                  <input
-                    type="number"
-                    placeholder="0"
-                    value={draftFor(p.id)}
-                    onChange={e => setDraft(p.id, e.target.value)}
-                    onBlur={() => saveDraft(p.id)}
-                    style={{ width: 110 }}
-                  />
-                </label>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.6rem', fontSize: '0.8rem' }}>
-                <div>
-                  <div style={{ color: 'var(--text-muted)', fontSize: '0.72rem' }}>recebido</div>
-                  <div className="mono" style={{ fontWeight: 600 }}>{money(recebido)}</div>
-                </div>
-                <div>
-                  <div style={{ color: 'var(--text-muted)', fontSize: '0.72rem' }}>já pago com vale</div>
-                  <div className="mono" style={{ fontWeight: 600 }}>{money(usado)}</div>
-                </div>
-                <div>
-                  <div style={{ color: 'var(--text-muted)', fontSize: '0.72rem' }}>saldo do vale</div>
-                  <div className="mono" style={{ fontWeight: 600, color: saldoVale >= 0 ? 'var(--success)' : 'var(--danger)' }}>{money(saldoVale)}</div>
-                </div>
-                <div>
-                  <div style={{ color: 'var(--text-muted)', fontSize: '0.72rem' }}>falta pagar de conta</div>
-                  <div className="mono" style={{ fontWeight: 700, color: faltaPagar > 0 ? 'var(--danger)' : 'var(--success)' }}>{money(Math.max(0, faltaPagar))}</div>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
     </section>
   );
 }
