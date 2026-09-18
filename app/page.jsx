@@ -4,12 +4,15 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../context/AuthContext';
 import ExtratoApp from '../components/ExtratoApp';
+import { usePartners } from '../lib/partners';
 
 export default function Home() {
   const { user, loading, logout, resendVerificationEmail, refreshUser } = useAuth();
   const router = useRouter();
   const [checking, setChecking] = useState(false);
   const [resent, setResent] = useState(false);
+  const partnersApi = usePartners(user);
+  const [viewUid, setViewUid] = useState(null);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -91,5 +94,15 @@ export default function Home() {
     );
   }
 
-  return <ExtratoApp />;
+  // Se o vínculo for desfeito enquanto se vê o parceiro, volta para os próprios dados.
+  const viewing = partnersApi.partners.find(p => p.uid === viewUid) || null;
+
+  return (
+    <ExtratoApp
+      key={viewing ? viewing.uid : 'me'}
+      viewing={viewing}
+      onView={setViewUid}
+      partnersApi={partnersApi}
+    />
+  );
 }

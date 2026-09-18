@@ -36,8 +36,11 @@ NEXT_PUBLIC_FIREBASE_APP_ID=
 ## 3. Publicar as regras de segurança do Firestore
 
 O arquivo `firestore.rules` já vem pronto — ele garante que cada usuário
-só leia/escreva no próprio documento (`users/{uid}`). Duas formas de
-aplicar:
+só leia/escreva no próprio documento (`users/{uid}`). Para o recurso de
+**Parceiros**, ele também libera a *leitura* do documento de quem estiver
+vinculado (coleções `invites` e `links`), nunca a escrita. **Sempre que este
+arquivo mudar, publique de novo** — sem isso o vínculo dá "permission-denied".
+Duas formas de aplicar:
 
 - **Pelo console**: em Firestore Database > Regras, cole o conteúdo de
   `firestore.rules` e publique.
@@ -78,6 +81,20 @@ deploy:
    autorizados** e adicione essa URL.
 
 Sem isso, o login funciona em `localhost` mas falha em produção.
+
+## Parceiros (ver os gastos de outra conta)
+
+Em **Parceiros**, uma pessoa gera um código de convite (vale 24 h, uso único)
+e a outra digita em "Tenho um código". O vínculo é dos dois lados e somente
+leitura: cada um vê os gastos do outro em tempo real (seletor "Meus gastos /
+nome") e qualquer um pode desvincular. Convites ficam em `invites/{código}` e
+vínculos em `links/{uidA_uidB}`.
+
+## Personalizar
+
+O botão **Personalizar** deixa cada pessoa escolher quais seções aparecem
+(pessoas, cartões, calendário, outros gastos, categorias, resumo, relatório).
+A escolha fica salva no aparelho (localStorage) e não apaga nenhum dado.
 
 ## Estrutura do projeto
 

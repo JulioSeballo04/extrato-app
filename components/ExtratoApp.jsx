@@ -1,9 +1,13 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Trash2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Users, Pencil, Check, X, Palette, LogOut } from 'lucide-react';
+import { Plus, Trash2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Users, Pencil, Check, X, Palette, LogOut, Link2, Eye, SlidersHorizontal } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { getUserData, saveUserData } from '../lib/firestore';
+import { getUserData, saveUserData, subscribeUserData } from '../lib/firestore';
+import PartnersPanel from './PartnersPanel';
+import CustomizePanel, { DEFAULT_VISIBLE } from './CustomizePanel';
+
+const VISIBLE_SECTIONS_KEY = 'gestor-de-gastos:secoes-visiveis';
 
 const CATEGORIES = ['Alimentação', 'Compras', 'Mercado', 'Lazer', 'Contas fixas', 'Transporte', 'Saúde', 'Educação', 'Assinaturas', 'Outros'];
 const DEFAULT_CATEGORY = 'Outros';
@@ -121,6 +125,40 @@ function matchesMonth(item, month) {
   return !!item.fixed && itemMonth < month;
 }
 
+// Dia de vencimento da fatura: inteiro de 1 a 31, ou 0 quando não informado.
+function parseDueDay(v) {
+  const n = Math.floor(Number(v));
+  return n >= 1 && n <= 31 ? n : 0;
+}
+function daysInMonth(y, m) {
+  return new Date(y, m + 1, 0).getDate();
+}
+function startOfDay(d) {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+// Próximo vencimento (hoje conta). Dia 31 em mês de 30 dias vence no último dia.
+function nextDueDate(dueDay, from = new Date()) {
+  if (!dueDay) return null;
+  const today = startOfDay(from);
+  for (let i = 0; i < 2; i++) {
+    const y = today.getFullYear();
+    const m = today.getMonth() + i;
+    const d = new Date(y, m, Math.min(dueDay, daysInMonth(y, m)));
+    if (d >= today) return d;
+  }
+  return null;
+}
+function daysUntil(date, from = new Date()) {
+  return Math.round((startOfDay(date) - startOfDay(from)) / 86400000);
+}
+function dueLabel(dueDay) {
+  const next = nextDueDate(dueDay);
+  if (!next) return null;
+  const n = daysUntil(next);
+  const when = n === 0 ? 'hoje' : n === 1 ? 'amanhã' : `em ${n} dias`;
+  return { text: `Vence dia ${String(next.getDate()).padStart(2, '0')} · ${when}`, urgent: n <= 3 };
+}
+
 function seedData() {
   const p1 = uid(), p2 = uid();
   const c1 = uid();
@@ -142,10 +180,18 @@ function seedData() {
   };
 }
 
-export default function ExtratoApp() {
+// `viewing` (opcional) é um parceiro vinculado ({ uid, label }): nesse caso o app
+// mostra os dados dele em modo somente leitura, sem salvar nada.
+export default function ExtratoApp({ viewing = null, onView = () => {}, partnersApi }) {
   const { user, logout } = useAuth();
+  const readOnly = !!viewing;
+  const dataUid = viewing ? viewing.uid : user?.uid;
   const userId = user?.uid;
 
+  const partners = partnersApi?.partners || [];
+  const [showPartners, setShowPartners] = useState(false);
+  const [showCustomize, setShowCustomize] = useState(false);
+  const [visible, setVisible] = useState(DEFAULT_VISIBLE);
   const [loaded, setLoaded] = useState(false);
   const [people, setPeople] = useState([]);
   const [cards, setCards] = useState([]);
@@ -159,17 +205,43 @@ export default function ExtratoApp() {
   const [paletteKey, setPaletteKey] = useState(DEFAULT_PALETTE);
   const firstLoad = useRef(true);
 
+  // Preferência de quais seções mostrar: fica só neste aparelho (localStorage),
+  // vale tanto para os próprios dados quanto ao ver um parceiro.
   useEffect(() => {
-    if (!userId) return;
+    try {
+      const raw = localStorage.getItem(VISIBLE_SECTIONS_KEY);
+      if (raw) setVisible({ ...DEFAULT_VISIBLE, ...JSON.parse(raw) });
+    } catch { /* sem localStorage: usa o padrão */ }
+  }, []);
+  function changeVisible(next) {
+    setVisible(next);
+    try { localStorage.setItem(VISIBLE_SECTIONS_KEY, JSON.stringify(next)); } catch { /* ignora */ }
+  }
+  const show = key => visible[key] !== false;
+
+  function applyData(data) {
+    setPeople(data.people || []);
+    setCards(data.cards || []);
+    setCardTransactions(data.cardTransactions || []);
+    setOtherExpenses(data.otherExpenses || []);
+    if (data.paletteKey && PALETTES[data.paletteKey]) setPaletteKey(data.paletteKey);
+  }
+
+  useEffect(() => {
+    if (!dataUid) return undefined;
+    if (readOnly) {
+      // Dados de outra pessoa: acompanha em tempo real, sem semear nem salvar.
+      return subscribeUserData(
+        dataUid,
+        (data) => { if (data) applyData(data); setStorageError(false); setLoaded(true); },
+        () => { setStorageError(true); setLoaded(true); },
+      );
+    }
     (async () => {
       try {
-        const data = await getUserData(userId);
+        const data = await getUserData(dataUid);
         if (data) {
-          setPeople(data.people || []);
-          setCards(data.cards || []);
-          setCardTransactions(data.cardTransactions || []);
-          setOtherExpenses(data.otherExpenses || []);
-          if (data.paletteKey && PALETTES[data.paletteKey]) setPaletteKey(data.paletteKey);
+          applyData(data);
         } else {
           const seed = seedData();
           setPeople(seed.people);
@@ -184,10 +256,11 @@ export default function ExtratoApp() {
         setLoaded(true);
       }
     })();
-  }, [userId]);
+    return undefined;
+  }, [dataUid, readOnly]);
 
   useEffect(() => {
-    if (!loaded || !userId) return;
+    if (!loaded || !userId || readOnly) return;
     if (firstLoad.current) { firstLoad.current = false; return; }
     const data = { people, cards, cardTransactions, otherExpenses, paletteKey };
     (async () => {
@@ -235,9 +308,12 @@ export default function ExtratoApp() {
   function updateSalary(id, salary) {
     setPeople(p => p.map(x => x.id === id ? { ...x, salary: Number(salary) || 0 } : x));
   }
-  function addCard(name, limitValue, bank) {
+  function addCard(name, limitValue, bank, dueDay) {
     if (!name.trim()) return;
-    setCards(c => [...c, { id: uid(), name: name.trim(), limitValue: Number(limitValue) || 0, bank: bank || '' }]);
+    setCards(c => [...c, { id: uid(), name: name.trim(), limitValue: Number(limitValue) || 0, bank: bank || '', dueDay: parseDueDay(dueDay) }]);
+  }
+  function updateCardDueDay(id, dueDay) {
+    setCards(c => c.map(x => x.id === id ? { ...x, dueDay: parseDueDay(dueDay) } : x));
   }
   function removeCard(id) {
     setCards(c => c.filter(x => x.id !== id));
@@ -433,15 +509,34 @@ export default function ExtratoApp() {
             <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>gestão de contas compartilhadas</span>
           </div>
           <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', color: 'var(--text-dim)' }}>
-              <Palette size={15} />
-              <select value={paletteKey} onChange={e => setPaletteKey(e.target.value)}>
-                {Object.entries(PALETTES).map(([key, pal]) => <option key={key} value={key}>{pal.label}</option>)}
-              </select>
-            </label>
-            <button className="ghost" onClick={() => (confirmClear ? clearAll() : setConfirmClear(true))}>
-              {confirmClear ? 'Confirmar limpeza' : 'Limpar tudo'}
+            {partners.length > 0 && (
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', color: 'var(--text-dim)' }}>
+                <Eye size={15} />
+                <select value={viewing ? viewing.uid : ''} onChange={e => onView(e.target.value || null)}>
+                  <option value="">Meus gastos</option>
+                  {partners.map(p => <option key={p.uid} value={p.uid}>{p.label}</option>)}
+                </select>
+              </label>
+            )}
+            <button className="ghost" onClick={() => { setShowPartners(s => !s); setShowCustomize(false); }}>
+              <Link2 size={14} style={{ marginRight: 4, verticalAlign: -2 }} />Parceiros
             </button>
+            <button className="ghost" onClick={() => { setShowCustomize(s => !s); setShowPartners(false); }}>
+              <SlidersHorizontal size={14} style={{ marginRight: 4, verticalAlign: -2 }} />Personalizar
+            </button>
+            {!readOnly && (
+              <>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', color: 'var(--text-dim)' }}>
+                  <Palette size={15} />
+                  <select value={paletteKey} onChange={e => setPaletteKey(e.target.value)}>
+                    {Object.entries(PALETTES).map(([key, pal]) => <option key={key} value={key}>{pal.label}</option>)}
+                  </select>
+                </label>
+                <button className="ghost" onClick={() => (confirmClear ? clearAll() : setConfirmClear(true))}>
+                  {confirmClear ? 'Confirmar limpeza' : 'Limpar tudo'}
+                </button>
+              </>
+            )}
             <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>{user?.email}</span>
             <button className="ghost" onClick={logout} title="Sair">
               <LogOut size={14} style={{ marginRight: 4, verticalAlign: -2 }} />Sair
@@ -457,15 +552,44 @@ export default function ExtratoApp() {
           <button className="icon" onClick={() => setSelectedMonth(m => shiftMonth(m, 1))} aria-label="Próximo mês"><ChevronRight size={18} /></button>
         </div>
 
+        {showPartners && partnersApi && (
+          <PartnersPanel
+            partnersApi={partnersApi}
+            onView={(uid) => { setShowPartners(false); onView(uid); }}
+            onClose={() => setShowPartners(false)}
+          />
+        )}
+
+        {showCustomize && (
+          <CustomizePanel visible={visible} onChange={changeVisible} onClose={() => setShowCustomize(false)} />
+        )}
+
+        {readOnly && (
+          <div className="no-print" style={{
+            display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', marginTop: '1rem',
+            padding: '0.6rem 0.9rem', borderRadius: 10, border: '1px solid var(--accent)', background: 'var(--panel)',
+          }}>
+            <Eye size={16} color="var(--accent-light)" />
+            <span style={{ fontSize: '0.85rem', flex: '1 1 200px' }}>
+              Você está vendo os gastos de <strong>{viewing.label}</strong> — somente leitura.
+            </span>
+            <button className="ghost" onClick={() => onView(null)}>Voltar aos meus gastos</button>
+          </div>
+        )}
+
         {storageError && (
           <p style={{ color: 'var(--danger)', fontSize: '0.8rem', marginTop: '0.5rem' }}>
-            Não consegui sincronizar seus dados com o servidor agora. Verifique sua conexão.
+            {readOnly
+              ? 'Não consegui carregar os gastos dessa pessoa. O vínculo pode ter sido desfeito, ou as regras do Firestore ainda não foram publicadas.'
+              : 'Não consegui sincronizar seus dados com o servidor agora. Verifique sua conexão.'}
           </p>
         )}
       </header>
 
       <main style={{ maxWidth: 1180, margin: '0 auto', padding: '0 1.5rem', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-        <PeopleSection people={people} onAdd={addPerson} onRemove={removePerson} onSalary={updateSalary} personColor={personColor} />
+        {show('people') && (
+          <PeopleSection people={people} onAdd={addPerson} onRemove={removePerson} onSalary={updateSalary} personColor={personColor} readOnly={readOnly} />
+        )}
 
         <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
           <Users size={16} color="var(--text-muted)" />
@@ -476,39 +600,58 @@ export default function ExtratoApp() {
           </select>
         </div>
 
-        <CardsSection
-          cards={cards} people={people} cardTransactions={cardTransactions}
-          filterPerson={filterPerson} selectedMonth={selectedMonth} expandedCard={expandedCard} setExpandedCard={setExpandedCard}
-          onAddCard={addCard} onRemoveCard={removeCard}
-          onAddTx={addCardTransaction} onRemoveTx={removeCardTransaction} onTogglePaid={toggleCardTransactionPaid} onUpdateTx={updateCardTransaction}
-          cardTotal={cardTotal} personName={personName} personColor={personColor} cardGradients={pal.cardGradients}
-        />
-
-        <OtherExpensesSection
-          expenses={otherExpenses} people={people} filterPerson={filterPerson} selectedMonth={selectedMonth}
-          onAdd={addOtherExpense} onRemove={removeOtherExpense} onUpdate={updateOtherExpense} onTogglePaid={toggleOtherExpensePaid}
-          personName={personName} personColor={personColor}
-        />
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '2rem', alignItems: 'start' }}>
-          <CategorySummarySection
-            people={people} cardTransactions={cardTransactions} otherExpenses={otherExpenses}
-            filterPerson={filterPerson} selectedMonth={selectedMonth} categoryColors={pal.people}
+        {show('cards') && (
+          <CardsSection
+            cards={cards} people={people} cardTransactions={cardTransactions}
+            filterPerson={filterPerson} selectedMonth={selectedMonth} expandedCard={expandedCard} setExpandedCard={setExpandedCard}
+            onAddCard={addCard} onRemoveCard={removeCard} onUpdateDueDay={updateCardDueDay}
+            onAddTx={addCardTransaction} onRemoveTx={removeCardTransaction} onTogglePaid={toggleCardTransactionPaid} onUpdateTx={updateCardTransaction}
+            cardTotal={cardTotal} personName={personName} personColor={personColor} cardGradients={pal.cardGradients} readOnly={readOnly}
           />
+        )}
 
-          <SummarySection people={people} personTotal={personTotal} personColor={personColor} selectedMonth={selectedMonth} />
-        </div>
+        {show('calendar') && (
+          <CalendarSection
+            cards={cards} cardTransactions={cardTransactions} otherExpenses={otherExpenses}
+            filterPerson={filterPerson} selectedMonth={selectedMonth} personName={personName} personColor={personColor}
+          />
+        )}
 
-        <ReportSection
-          people={people} cards={cards} cardTransactions={cardTransactions} otherExpenses={otherExpenses}
-          selectedMonth={selectedMonth} personTotal={personTotal} personColor={personColor}
-        />
+        {show('other') && (
+          <OtherExpensesSection
+            expenses={otherExpenses} people={people} filterPerson={filterPerson} selectedMonth={selectedMonth}
+            onAdd={addOtherExpense} onRemove={removeOtherExpense} onUpdate={updateOtherExpense} onTogglePaid={toggleOtherExpensePaid}
+            personName={personName} personColor={personColor} readOnly={readOnly}
+          />
+        )}
+
+        {(show('categories') || show('summary')) && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '2rem', alignItems: 'start' }}>
+            {show('categories') && (
+              <CategorySummarySection
+                people={people} cardTransactions={cardTransactions} otherExpenses={otherExpenses}
+                filterPerson={filterPerson} selectedMonth={selectedMonth} categoryColors={pal.people}
+              />
+            )}
+
+            {show('summary') && (
+              <SummarySection people={people} personTotal={personTotal} personColor={personColor} selectedMonth={selectedMonth} />
+            )}
+          </div>
+        )}
+
+        {show('report') && (
+          <ReportSection
+            people={people} cards={cards} cardTransactions={cardTransactions} otherExpenses={otherExpenses}
+            selectedMonth={selectedMonth} personTotal={personTotal} personColor={personColor}
+          />
+        )}
       </main>
     </div>
   );
 }
 
-function PeopleSection({ people, onAdd, onRemove, onSalary, personColor }) {
+function PeopleSection({ people, onAdd, onRemove, onSalary, personColor, readOnly }) {
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState('');
   const [salary, setSalary] = useState('');
@@ -522,13 +665,17 @@ function PeopleSection({ people, onAdd, onRemove, onSalary, personColor }) {
     <section className="panel">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
         <h2 className="display" style={{ fontSize: '1.15rem', margin: 0 }}>Pessoas & salários</h2>
-        <button className="ghost" onClick={() => setShowForm(s => !s)}>
-          <Plus size={14} style={{ marginRight: 4, verticalAlign: -2 }} />Pessoa
-        </button>
+        {!readOnly && (
+          <button className="ghost" onClick={() => setShowForm(s => !s)}>
+            <Plus size={14} style={{ marginRight: 4, verticalAlign: -2 }} />Pessoa
+          </button>
+        )}
       </div>
 
       {people.length === 0 && (
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Nenhuma pessoa cadastrada ainda. Adicione quem usa as contas.</p>
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+          {readOnly ? 'Nenhuma pessoa cadastrada ainda.' : 'Nenhuma pessoa cadastrada ainda. Adicione quem usa as contas.'}
+        </p>
       )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
@@ -537,13 +684,13 @@ function PeopleSection({ people, onAdd, onRemove, onSalary, personColor }) {
             <span style={{ width: 10, height: 10, borderRadius: '50%', background: personColor(p.id), flexShrink: 0 }} />
             <span style={{ minWidth: 120, fontWeight: 500 }}>{p.name}</span>
             <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>salário</span>
-            <input type="number" value={p.salary} onChange={e => onSalary(p.id, e.target.value)} style={{ width: 110 }} />
-            <button className="icon" onClick={() => onRemove(p.id)} aria-label={`Remover ${p.name}`}><Trash2 size={15} /></button>
+            <input type="number" value={p.salary} onChange={e => onSalary(p.id, e.target.value)} style={{ width: 110 }} readOnly={readOnly} />
+            {!readOnly && <button className="icon" onClick={() => onRemove(p.id)} aria-label={`Remover ${p.name}`}><Trash2 size={15} /></button>}
           </div>
         ))}
       </div>
 
-      {showForm && (
+      {showForm && !readOnly && (
         <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem', flexWrap: 'wrap' }}>
           <input placeholder="Nome" value={name} onChange={e => setName(e.target.value)} style={{ flex: '1 1 140px' }} />
           <input placeholder="Salário" type="number" value={salary} onChange={e => setSalary(e.target.value)} style={{ width: 110 }} />
@@ -554,29 +701,41 @@ function PeopleSection({ people, onAdd, onRemove, onSalary, personColor }) {
   );
 }
 
-function CardsSection({ cards, people, cardTransactions, filterPerson, selectedMonth, expandedCard, setExpandedCard, onAddCard, onRemoveCard, onAddTx, onRemoveTx, onTogglePaid, onUpdateTx, cardTotal, personName, personColor, cardGradients }) {
+function CardsSection({ cards, people, cardTransactions, filterPerson, selectedMonth, expandedCard, setExpandedCard, onAddCard, onRemoveCard, onUpdateDueDay, onAddTx, onRemoveTx, onTogglePaid, onUpdateTx, cardTotal, personName, personColor, cardGradients, readOnly }) {
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState('');
   const [limitValue, setLimitValue] = useState('');
   const [bank, setBank] = useState('');
+  const [dueDay, setDueDay] = useState('');
 
   function submit() {
-    onAddCard(name, limitValue, bank);
-    setName(''); setLimitValue(''); setBank(''); setShowForm(false);
+    onAddCard(name, limitValue, bank, dueDay);
+    setName(''); setLimitValue(''); setBank(''); setDueDay(''); setShowForm(false);
   }
 
   const activeCard = cards.find(c => c.id === expandedCard);
+
+  // Quanto cada pessoa gastou em todos os cartões no mês selecionado.
+  const spentByPerson = people.map(p => ({
+    person: p,
+    total: cardTransactions
+      .filter(t => t.personId === p.id && matchesMonth(t, selectedMonth))
+      .reduce((s, t) => s + Number(t.amount || 0), 0),
+  }));
+  const spentTotal = spentByPerson.reduce((s, x) => s + x.total, 0);
 
   return (
     <section>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
         <h2 className="display" style={{ fontSize: '1.15rem', margin: 0 }}>Cartões de crédito</h2>
-        <button className="ghost" onClick={() => setShowForm(s => !s)}>
-          <Plus size={14} style={{ marginRight: 4, verticalAlign: -2 }} />Cartão
-        </button>
+        {!readOnly && (
+          <button className="ghost" onClick={() => setShowForm(s => !s)}>
+            <Plus size={14} style={{ marginRight: 4, verticalAlign: -2 }} />Cartão
+          </button>
+        )}
       </div>
 
-      {showForm && (
+      {showForm && !readOnly && (
         <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
           <input placeholder="Nome do cartão" value={name} onChange={e => setName(e.target.value)} style={{ flex: '1 1 160px' }} />
           <select value={bank} onChange={e => setBank(e.target.value)} style={{ width: 150 }}>
@@ -584,6 +743,7 @@ function CardsSection({ cards, people, cardTransactions, filterPerson, selectedM
             {Object.entries(BANKS).map(([key, b]) => <option key={key} value={key}>{b.label}</option>)}
           </select>
           <input placeholder="Limite" type="number" value={limitValue} onChange={e => setLimitValue(e.target.value)} style={{ width: 110 }} />
+          <input placeholder="Vence dia" type="number" min="1" max="31" value={dueDay} onChange={e => setDueDay(e.target.value)} style={{ width: 100 }} title="Dia do vencimento da fatura" />
           <button className="primary" onClick={submit}>Adicionar</button>
         </div>
       )}
@@ -598,6 +758,7 @@ function CardsSection({ cards, people, cardTransactions, filterPerson, selectedM
             const chipColor = bankInfo ? bankInfo.chip : null;
             const used = cardTotal(c.id, selectedMonth);
             const pct = c.limitValue > 0 ? Math.min(100, (used / c.limitValue) * 100) : 0;
+            const due = dueLabel(c.dueDay);
             return (
               <div key={c.id} className="credit-card" onClick={() => setExpandedCard(expandedCard === c.id ? null : c.id)}
                 style={{ background: `linear-gradient(135deg, ${ca}, ${cb})` }}>
@@ -613,9 +774,11 @@ function CardsSection({ cards, people, cardTransactions, filterPerson, selectedM
                       {bankInfo.label}
                     </span>
                   )}
-                  <button className="icon" style={{ color: 'rgba(255,255,255,0.6)' }} onClick={e => { e.stopPropagation(); onRemoveCard(c.id); }}>
-                    <Trash2 size={14} />
-                  </button>
+                  {!readOnly && (
+                    <button className="icon" style={{ color: 'rgba(255,255,255,0.6)' }} onClick={e => { e.stopPropagation(); onRemoveCard(c.id); }}>
+                      <Trash2 size={14} />
+                    </button>
+                  )}
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: '1.5rem' }}>
                   <div>
@@ -627,9 +790,29 @@ function CardsSection({ cards, people, cardTransactions, filterPerson, selectedM
                 <div style={{ height: 3, background: 'rgba(255,255,255,0.2)', borderRadius: 2, marginTop: '0.6rem', overflow: 'hidden' }}>
                   <div style={{ height: '100%', width: `${pct}%`, background: used > c.limitValue ? 'var(--danger)' : (chipColor || 'var(--accent-light)') }} />
                 </div>
+                {due && (
+                  <div style={{ fontSize: '0.7rem', fontWeight: 600, marginTop: '0.55rem', color: due.urgent ? '#FFB4A2' : 'rgba(255,255,255,0.75)' }}>
+                    {due.text}
+                  </div>
+                )}
               </div>
             );
           })}
+        </div>
+      )}
+
+      {cards.length > 0 && people.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem 1.1rem', flexWrap: 'wrap', marginTop: '0.9rem', fontSize: '0.82rem' }}>
+          <span style={{ color: 'var(--text-muted)' }}>Gasto no cartão em {monthLabel(selectedMonth)}:</span>
+          {spentByPerson.map(({ person, total }) => (
+            <span key={person.id} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: personColor(person.id) }} />
+              {person.name} <span className="mono" style={{ fontWeight: 600 }}>{money(total)}</span>
+            </span>
+          ))}
+          {people.length > 1 && (
+            <span style={{ color: 'var(--text-muted)' }}>· total <span className="mono" style={{ color: 'var(--text-dim)', fontWeight: 600 }}>{money(spentTotal)}</span></span>
+          )}
         </div>
       )}
 
@@ -638,16 +821,17 @@ function CardsSection({ cards, people, cardTransactions, filterPerson, selectedM
           card={activeCard}
           people={people}
           selectedMonth={selectedMonth}
+          monthTransactions={cardTransactions.filter(t => t.cardId === activeCard.id && matchesMonth(t, selectedMonth))}
           transactions={cardTransactions.filter(t => t.cardId === activeCard.id && matchesMonth(t, selectedMonth) && (filterPerson === 'all' || t.personId === filterPerson))}
-          onAddTx={onAddTx} onRemoveTx={onRemoveTx} onTogglePaid={onTogglePaid} onUpdateTx={onUpdateTx}
-          personName={personName} personColor={personColor}
+          onAddTx={onAddTx} onRemoveTx={onRemoveTx} onTogglePaid={onTogglePaid} onUpdateTx={onUpdateTx} onUpdateDueDay={onUpdateDueDay}
+          personName={personName} personColor={personColor} readOnly={readOnly}
         />
       )}
     </section>
   );
 }
 
-function CardLedger({ card, people, transactions, selectedMonth, onAddTx, onRemoveTx, onTogglePaid, onUpdateTx, personName, personColor }) {
+function CardLedger({ card, people, transactions, monthTransactions, selectedMonth, onAddTx, onRemoveTx, onTogglePaid, onUpdateTx, onUpdateDueDay, personName, personColor, readOnly }) {
   const [desc, setDesc] = useState('');
   const [amount, setAmount] = useState('');
   const [personId, setPersonId] = useState(people[0]?.id || '');
@@ -694,6 +878,10 @@ function CardLedger({ card, people, transactions, selectedMonth, onAddTx, onRemo
 
   const fixedTotal = transactions.filter(t => t.fixed && matchesMonth(t, selectedMonth)).reduce((s, t) => s + Number(t.amount || 0), 0);
   const sorted = [...transactions].sort((a, b) => (a.date < b.date ? 1 : -1));
+  const spentByPerson = people
+    .map(p => ({ person: p, total: monthTransactions.filter(t => t.personId === p.id).reduce((s, t) => s + Number(t.amount || 0), 0) }))
+    .filter(x => x.total > 0);
+  const due = dueLabel(card.dueDay);
 
   return (
     <div className="panel" style={{ marginTop: '1rem' }}>
@@ -704,7 +892,25 @@ function CardLedger({ card, people, transactions, selectedMonth, onAddTx, onRemo
         )}
       </div>
 
-      {people.length === 0 ? (
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem 1.1rem', flexWrap: 'wrap', marginBottom: '0.9rem', fontSize: '0.8rem' }}>
+        {readOnly ? (
+          card.dueDay ? <span style={{ color: due?.urgent ? 'var(--danger)' : 'var(--text-dim)' }}>Fatura vence dia {card.dueDay}{due ? ` · ${due.text.split(' · ')[1]}` : ''}</span> : null
+        ) : (
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--text-dim)' }}>
+            Fatura vence dia
+            <input type="number" min="1" max="31" placeholder="—" value={card.dueDay || ''} onChange={e => onUpdateDueDay(card.id, e.target.value)} style={{ width: 64 }} />
+            {due && <span style={{ color: due.urgent ? 'var(--danger)' : 'var(--text-muted)' }}>{due.text.split(' · ')[1]}</span>}
+          </label>
+        )}
+        {spentByPerson.map(({ person, total }) => (
+          <span key={person.id} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', color: 'var(--text-dim)' }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: personColor(person.id) }} />
+            {person.name} <span className="mono" style={{ fontWeight: 600, color: 'var(--text)' }}>{money(total)}</span>
+          </span>
+        ))}
+      </div>
+
+      {readOnly ? null : people.length === 0 ? (
         <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Cadastre uma pessoa acima para lançar gastos neste cartão.</p>
       ) : (
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center', marginBottom: '1rem' }}>
@@ -754,7 +960,7 @@ function CardLedger({ card, people, transactions, selectedMonth, onAddTx, onRemo
           <button className="primary" onClick={submit}><Plus size={14} /> Lançar</button>
         </div>
       )}
-      {people.length > 0 && installmentsNum > 1 && (
+      {!readOnly && people.length > 0 && installmentsNum > 1 && (
         <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '-0.6rem', marginBottom: '0.9rem' }}>
           Vai gerar {installmentsNum} lançamentos de {money((Number(amount) || 0) / splitCount / installmentsNum)}.{' '}
           {Number(paidInstallments) > 0
@@ -763,7 +969,7 @@ function CardLedger({ card, people, transactions, selectedMonth, onAddTx, onRemo
           {splitCount > 1 && <> Dividido entre {splitCount} pessoas.</>}
         </p>
       )}
-      {people.length > 0 && installmentsNum === 1 && splitCount > 1 && (
+      {!readOnly && people.length > 0 && installmentsNum === 1 && splitCount > 1 && (
         <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '-0.6rem', marginBottom: '0.9rem' }}>
           Vai gerar {splitCount} lançamentos de {money((Number(amount) || 0) / splitCount)}, um pra cada pessoa.
         </p>
@@ -802,19 +1008,20 @@ function CardLedger({ card, people, transactions, selectedMonth, onAddTx, onRemo
                   {t.installmentTotal > 1 && (
                     <button
                       onClick={() => onTogglePaid(t.id)}
+                      disabled={readOnly}
                       style={{
                         fontSize: '0.65rem', fontWeight: 600, letterSpacing: '0.03em', border: 'none', borderRadius: 4,
-                        padding: '0.15rem 0.45rem', cursor: 'pointer',
+                        padding: '0.15rem 0.45rem', cursor: readOnly ? 'default' : 'pointer',
                         background: t.paid ? 'var(--success-bg)' : 'var(--danger-bg)', color: t.paid ? 'var(--success)' : 'var(--danger)',
                       }}
-                      title="Clique para alternar pago/pendente"
+                      title={readOnly ? undefined : 'Clique para alternar pago/pendente'}
                     >
                       {t.paid ? 'PAGA' : 'PENDENTE'}
                     </button>
                   )}
                   <span className="mono" style={{ fontWeight: 600 }}>{money(t.amount)}</span>
-                  <button className="icon" onClick={() => startEdit(t)} title="Editar"><Pencil size={14} /></button>
-                  <button className="icon" onClick={() => onRemoveTx(t.id)}><Trash2 size={14} /></button>
+                  {!readOnly && <button className="icon" onClick={() => startEdit(t)} title="Editar"><Pencil size={14} /></button>}
+                  {!readOnly && <button className="icon" onClick={() => onRemoveTx(t.id)}><Trash2 size={14} /></button>}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
                   <span style={{ flex: '1 1 auto', minWidth: 80 }}>{t.description}</span>
@@ -844,7 +1051,7 @@ function CardLedger({ card, people, transactions, selectedMonth, onAddTx, onRemo
   );
 }
 
-function OtherExpensesSection({ expenses, people, filterPerson, selectedMonth, onAdd, onRemove, onUpdate, onTogglePaid, personName, personColor }) {
+function OtherExpensesSection({ expenses, people, filterPerson, selectedMonth, onAdd, onRemove, onUpdate, onTogglePaid, personName, personColor, readOnly }) {
   const [desc, setDesc] = useState('');
   const [amount, setAmount] = useState('');
   const [personId, setPersonId] = useState(people[0]?.id || '');
@@ -912,7 +1119,7 @@ function OtherExpensesSection({ expenses, people, filterPerson, selectedMonth, o
         </div>
       </div>
 
-      {people.length === 0 ? (
+      {readOnly ? null : people.length === 0 ? (
         <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Cadastre uma pessoa acima para lançar gastos.</p>
       ) : (
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center', marginBottom: '1rem' }}>
@@ -962,7 +1169,7 @@ function OtherExpensesSection({ expenses, people, filterPerson, selectedMonth, o
           <button className="primary" onClick={submit}><Plus size={14} /> Lançar</button>
         </div>
       )}
-      {people.length > 0 && installmentsNum > 1 && (
+      {!readOnly && people.length > 0 && installmentsNum > 1 && (
         <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '-0.6rem', marginBottom: '0.9rem' }}>
           Vai gerar {installmentsNum} lançamentos de {money((Number(amount) || 0) / splitCount / installmentsNum)}.{' '}
           {Number(paidInstallments) > 0
@@ -971,7 +1178,7 @@ function OtherExpensesSection({ expenses, people, filterPerson, selectedMonth, o
           {splitCount > 1 && <> Dividido entre {splitCount} pessoas.</>}
         </p>
       )}
-      {people.length > 0 && installmentsNum === 1 && splitCount > 1 && (
+      {!readOnly && people.length > 0 && installmentsNum === 1 && splitCount > 1 && (
         <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '-0.6rem', marginBottom: '0.9rem' }}>
           Vai gerar {splitCount} lançamentos de {money((Number(amount) || 0) / splitCount)}, um pra cada pessoa.
         </p>
@@ -1010,19 +1217,20 @@ function OtherExpensesSection({ expenses, people, filterPerson, selectedMonth, o
                   {e.installmentTotal > 1 && (
                     <button
                       onClick={() => onTogglePaid(e.id)}
+                      disabled={readOnly}
                       style={{
                         fontSize: '0.65rem', fontWeight: 600, letterSpacing: '0.03em', border: 'none', borderRadius: 4,
-                        padding: '0.15rem 0.45rem', cursor: 'pointer',
+                        padding: '0.15rem 0.45rem', cursor: readOnly ? 'default' : 'pointer',
                         background: e.paid ? 'var(--success-bg)' : 'var(--danger-bg)', color: e.paid ? 'var(--success)' : 'var(--danger)',
                       }}
-                      title="Clique para alternar pago/pendente"
+                      title={readOnly ? undefined : 'Clique para alternar pago/pendente'}
                     >
                       {e.paid ? 'PAGA' : 'PENDENTE'}
                     </button>
                   )}
                   <span className="mono" style={{ fontWeight: 600 }}>{money(e.amount)}</span>
-                  <button className="icon" onClick={() => startEdit(e)} title="Editar"><Pencil size={14} /></button>
-                  <button className="icon" onClick={() => onRemove(e.id)}><Trash2 size={14} /></button>
+                  {!readOnly && <button className="icon" onClick={() => startEdit(e)} title="Editar"><Pencil size={14} /></button>}
+                  {!readOnly && <button className="icon" onClick={() => onRemove(e.id)}><Trash2 size={14} /></button>}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
                   <span style={{ flex: '1 1 auto', minWidth: 80 }}>{e.description}</span>
@@ -1207,7 +1415,7 @@ function SummarySection({ people, personTotal, personColor, selectedMonth }) {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.1rem' }}>
           {people.map(p => {
-            const { total } = personTotal(p.id, selectedMonth);
+            const { total, cardSum, otherSum } = personTotal(p.id, selectedMonth);
             const remaining = p.salary - total;
             const pct = p.salary > 0 ? Math.min(100, (total / p.salary) * 100) : 0;
             return (
@@ -1228,6 +1436,148 @@ function SummarySection({ people, personTotal, personColor, selectedMonth }) {
                   <span>gasto: {money(total)}</span>
                   <span>salário: {money(p.salary)}</span>
                 </div>
+                <div style={{ marginTop: '0.2rem', fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                  no cartão: {money(cardSum)} · outros gastos: {money(otherSum)}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
+const WEEKDAYS = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
+
+// Calendário do mês selecionado: vencimento das faturas dos cartões e gastos com
+// data (os "fixos" repetem todo mês, no mesmo dia). Respeita o filtro de pessoa.
+function CalendarSection({ cards, cardTransactions, otherExpenses, filterPerson, selectedMonth, personName, personColor }) {
+  const [selectedDay, setSelectedDay] = useState(null);
+
+  const [y, m] = selectedMonth.split('-').map(Number);
+  const dim = daysInMonth(y, m - 1);
+  const isCurrentMonth = selectedMonth === currentMonth();
+  const todayDay = new Date().getDate();
+  const inScope = t => filterPerson === 'all' || t.personId === filterPerson;
+
+  const events = {};
+  function push(day, ev) {
+    if (!events[day]) events[day] = [];
+    events[day].push(ev);
+  }
+
+  for (const c of cards) {
+    if (!c.dueDay) continue;
+    const amount = cardTransactions
+      .filter(t => t.cardId === c.id && matchesMonth(t, selectedMonth) && inScope(t))
+      .reduce((s, t) => s + Number(t.amount || 0), 0);
+    push(Math.min(c.dueDay, dim), { kind: 'card', id: `card-${c.id}`, title: `Fatura ${c.name}`, amount, paid: null });
+  }
+  for (const e of otherExpenses) {
+    if (!matchesMonth(e, selectedMonth) || !inScope(e)) continue;
+    const day = Math.min(Number(e.date.slice(8, 10)) || 1, dim);
+    push(day, {
+      kind: 'expense', id: e.id, title: e.description, amount: Number(e.amount || 0), personId: e.personId,
+      paid: e.installmentTotal > 1 ? !!e.paid : null,
+    });
+  }
+
+  const daysWithEvents = Object.keys(events).map(Number).sort((a, b) => a - b);
+  const monthTotal = daysWithEvents.reduce((s, d) => s + events[d].reduce((x, ev) => x + ev.amount, 0), 0);
+  const listDays = selectedDay ? daysWithEvents.filter(d => d === selectedDay) : daysWithEvents;
+
+  const blanks = new Date(y, m - 1, 1).getDay();
+  const cells = [...Array(blanks).fill(null), ...Array.from({ length: dim }, (_, i) => i + 1)];
+
+  return (
+    <section className="panel">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.35rem' }}>
+        <h2 className="display" style={{ fontSize: '1.15rem', margin: 0 }}>Calendário de contas</h2>
+        {monthTotal > 0 && (
+          <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>no mês: <span className="mono" style={{ color: 'var(--text-dim)' }}>{money(monthTotal)}</span></span>
+        )}
+      </div>
+      <p style={{ color: 'var(--text-muted)', fontSize: '0.78rem', margin: '0 0 1rem' }}>
+        Vencimentos das faturas dos cartões e gastos com data. Toque num dia para ver só ele.
+      </p>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 4, marginBottom: '0.5rem' }}>
+        {WEEKDAYS.map(w => (
+          <div key={w} style={{ textAlign: 'center', fontSize: '0.68rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{w}</div>
+        ))}
+        {cells.map((day, i) => {
+          if (!day) return <div key={`b${i}`} />;
+          const evs = events[day] || [];
+          const hasCard = evs.some(ev => ev.kind === 'card');
+          const isToday = isCurrentMonth && day === todayDay;
+          const isSelected = selectedDay === day;
+          return (
+            <button
+              key={day}
+              onClick={() => setSelectedDay(isSelected ? null : day)}
+              aria-label={`Dia ${day}${evs.length ? `, ${evs.length} conta${evs.length > 1 ? 's' : ''}` : ''}`}
+              style={{
+                minHeight: 46, borderRadius: 8, padding: '0.3rem 0.2rem', cursor: 'pointer',
+                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'space-between', gap: 3,
+                background: isSelected ? 'var(--panel-alt)' : 'transparent', color: 'var(--text)', fontFamily: 'inherit',
+                border: `1px solid ${isSelected || hasCard ? 'var(--accent)' : 'var(--border)'}`,
+                opacity: isCurrentMonth && day < todayDay && evs.length === 0 ? 0.5 : 1,
+              }}
+            >
+              <span className="mono" style={{
+                fontSize: '0.8rem', fontWeight: isToday ? 700 : 500, lineHeight: 1,
+                ...(isToday ? { background: 'var(--accent)', color: 'var(--bg)', borderRadius: 999, padding: '0.15rem 0.35rem' } : {}),
+              }}>{day}</span>
+              <span style={{ display: 'flex', gap: 3, height: 6 }}>
+                {evs.slice(0, 4).map(ev => (
+                  <span key={ev.id} style={{ width: 6, height: 6, borderRadius: '50%', background: ev.kind === 'card' ? 'var(--accent-light)' : 'var(--info)' }} />
+                ))}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div style={{ display: 'flex', gap: '1rem', fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: '1rem', flexWrap: 'wrap' }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent-light)' }} />fatura do cartão</span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--info)' }} />outro gasto</span>
+      </div>
+
+      {listDays.length === 0 ? (
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', margin: 0 }}>
+          {selectedDay
+            ? `Nenhuma conta no dia ${selectedDay}.`
+            : 'Nada com data neste mês. Cadastre o dia de vencimento dos cartões e lance gastos com data para ver aqui.'}
+        </p>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
+          {listDays.map(day => {
+            const past = isCurrentMonth && day < todayDay;
+            const weekday = WEEKDAYS[new Date(y, m - 1, day).getDay()];
+            const isToday = isCurrentMonth && day === todayDay;
+            return (
+              <div key={day} style={{ opacity: past ? 0.6 : 1 }}>
+                <div style={{ fontSize: '0.78rem', color: isToday ? 'var(--accent-light)' : 'var(--text-muted)', fontWeight: 600, marginBottom: '0.25rem' }}>
+                  Dia {String(day).padStart(2, '0')} · {weekday}{isToday ? ' · hoje' : ''}
+                </div>
+                {events[day].map(ev => (
+                  <div key={ev.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', padding: '0.3rem 0', borderBottom: '1px solid var(--border)', flexWrap: 'wrap' }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, background: ev.kind === 'card' ? 'var(--accent-light)' : 'var(--info)' }} />
+                    <span style={{ flex: '1 1 120px', minWidth: 0 }}>{ev.title}</span>
+                    {ev.kind === 'expense' && (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--text-dim)', fontSize: '0.78rem' }}>
+                        <span style={{ width: 7, height: 7, borderRadius: '50%', background: personColor(ev.personId) }} />{personName(ev.personId)}
+                      </span>
+                    )}
+                    {ev.paid !== null && (
+                      <span style={{ fontSize: '0.65rem', fontWeight: 600, borderRadius: 4, padding: '0.15rem 0.45rem', background: ev.paid ? 'var(--success-bg)' : 'var(--danger-bg)', color: ev.paid ? 'var(--success)' : 'var(--danger)' }}>
+                        {ev.paid ? 'PAGA' : 'PENDENTE'}
+                      </span>
+                    )}
+                    <span className="mono" style={{ fontWeight: 600 }}>{money(ev.amount)}</span>
+                  </div>
+                ))}
               </div>
             );
           })}
