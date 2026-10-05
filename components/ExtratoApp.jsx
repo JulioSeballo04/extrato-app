@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Trash2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Users, Pencil, Check, X, Palette, LogOut, Link2, Eye, SlidersHorizontal } from 'lucide-react';
+import { Plus, Trash2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Users, Pencil, Check, X, Palette, LogOut, Link2, Eye, SlidersHorizontal, ListChecks } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { saveUserData, subscribeUserData } from '../lib/firestore';
 import PartnersPanel from './PartnersPanel';
@@ -123,6 +123,20 @@ function monthsLaterDate(dateStr, n) {
 function isRecurring(item) {
   return !!item?.fixed && !(item.installmentTotal > 1);
 }
+// Pago/pendente em um mês. Um gasto fixo é um único registro que vale todo mês,
+// então guarda os meses pagos (`paidMonths`); os demais têm um `paid` só.
+function isPaidIn(item, month) {
+  return isRecurring(item) ? (item.paidMonths || []).includes(month) : !!item.paid;
+}
+function togglePaidIn(item, month) {
+  if (!isRecurring(item)) return { ...item, paid: !item.paid };
+  const months = item.paidMonths || [];
+  return { ...item, paidMonths: months.includes(month) ? months.filter(m => m !== month) : [...months, month] };
+}
+// Fatura do cartão: marcada como paga por mês, no próprio cartão.
+function isInvoicePaid(card, month) {
+  return (card.paidInvoices || []).includes(month);
+}
 function matchesMonth(item, month) {
   if (!item?.date || !month) return false;
   const itemMonth = item.date.slice(0, 7);
@@ -214,8 +228,7 @@ export default function ExtratoApp({ viewing = null, onView = () => {}, partners
   const userId = user?.uid;
 
   const partners = partnersApi?.partners || [];
-  const [showPartners, setShowPartners] = useState(false);
-  const [showCustomize, setShowCustomize] = useState(false);
+  const [openPanel, setOpenPanel] = useState(null); // 'partners' | 'customize' | 'bills' | null
   const [visible, setVisible] = useState(DEFAULT_VISIBLE);
   // 'loading' até o primeiro snapshot confiável; 'failed' se nem isso veio.
   const [syncState, setSyncState] = useState('loading');
@@ -248,6 +261,9 @@ export default function ExtratoApp({ viewing = null, onView = () => {}, partners
     try { localStorage.setItem(VISIBLE_SECTIONS_KEY, JSON.stringify(next)); } catch { /* ignora */ }
   }
   const show = key => visible[key] !== false;
+  function togglePanel(name) {
+    setOpenPanel(p => (p === name ? null : name));
+  }
 
   function applyData(data) {
     setPeople(data.people || []);
@@ -328,6 +344,30 @@ export default function ExtratoApp({ viewing = null, onView = () => {}, partners
     ...cardTransactions.map(t => t.date && t.date.slice(0, 7)),
     ...otherExpenses.map(t => t.date && t.date.slice(0, 7)),
   ].filter(Boolean))).sort();
+  // Contas do mês para marcar como pagas: a fatura de cada cartão (com o dia de
+  // vencimento, se houver) e cada gasto fora do cartão. Respeita o filtro de pessoa.
+  const inScope = t => filterPerson === 'all' || t.personId === filterPerson;
+  const [selY, selM] = selectedMonth.split('-').map(Number);
+  const selDim = daysInMonth(selY, selM - 1);
+  const monthBills = [
+    ...cards.map(c => ({
+      kind: 'card', id: `card-${c.id}`, refId: c.id, title: `Fatura ${c.name}`,
+      day: c.dueDay ? Math.min(c.dueDay, selDim) : null,
+      amount: cardTransactions.filter(t => t.cardId === c.id && matchesMonth(t, selectedMonth) && inScope(t)).reduce((s, t) => s + Number(t.amount || 0), 0),
+      paid: isInvoicePaid(c, selectedMonth),
+    })).filter(b => b.amount > 0),
+    ...otherExpenses.filter(e => matchesMonth(e, selectedMonth) && inScope(e)).map(e => ({
+      kind: 'expense', id: e.id, refId: e.id, title: e.description, personId: e.personId,
+      day: Number(e.date.slice(8, 10)) || null, amount: Number(e.amount || 0), paid: isPaidIn(e, selectedMonth),
+      tag: e.installmentTotal > 1 ? `${e.installmentNumber}/${e.installmentTotal}` : isRecurring(e) ? 'FIXO' : null,
+    })),
+  ].sort((a, b) => (a.day || 99) - (b.day || 99));
+  function toggleBill(bill) {
+    if (bill.kind === 'card') toggleInvoicePaid(bill.refId, selectedMonth);
+    else toggleOtherExpensePaid(bill.refId, selectedMonth);
+  }
+  const billsPaidCount = monthBills.filter(b => b.paid).length;
+
   function personName(id) {
     const p = people.find(p => p.id === id);
     return p ? p.name : '—';
@@ -443,8 +483,15 @@ export default function ExtratoApp({ viewing = null, onView = () => {}, partners
   function removeOtherExpense(id) {
     setOtherExpenses(t => t.filter(x => x.id !== id));
   }
-  function toggleOtherExpensePaid(id) {
-    setOtherExpenses(t => t.map(x => x.id === id ? { ...x, paid: !x.paid } : x));
+  function toggleOtherExpensePaid(id, month) {
+    setOtherExpenses(t => t.map(x => x.id === id ? togglePaidIn(x, month) : x));
+  }
+  function toggleInvoicePaid(cardId, month) {
+    setCards(c => c.map(x => {
+      if (x.id !== cardId) return x;
+      const months = x.paidInvoices || [];
+      return { ...x, paidInvoices: months.includes(month) ? months.filter(m => m !== month) : [...months, month] };
+    }));
   }
   function updateOtherExpense(id, patch) {
     setOtherExpenses(t => t.map(x => x.id === id ? {
@@ -578,10 +625,10 @@ export default function ExtratoApp({ viewing = null, onView = () => {}, partners
                 </select>
               </label>
             )}
-            <button className="ghost" onClick={() => { setShowPartners(s => !s); setShowCustomize(false); }}>
+            <button className="ghost" onClick={() => togglePanel('partners')}>
               <Link2 size={14} style={{ marginRight: 4, verticalAlign: -2 }} />Parceiros
             </button>
-            <button className="ghost" onClick={() => { setShowCustomize(s => !s); setShowPartners(false); }}>
+            <button className="ghost" onClick={() => togglePanel('customize')}>
               <SlidersHorizontal size={14} style={{ marginRight: 4, verticalAlign: -2 }} />Personalizar
             </button>
             {!readOnly && (
@@ -610,18 +657,32 @@ export default function ExtratoApp({ viewing = null, onView = () => {}, partners
             {availableMonths.map(m => <option key={m} value={m} style={{ textTransform: 'capitalize' }}>{monthLabel(m)}</option>)}
           </select>
           <button className="icon" onClick={() => setSelectedMonth(m => shiftMonth(m, 1))} aria-label="Próximo mês"><ChevronRight size={18} /></button>
+          {monthBills.length > 0 && (
+            <button className="ghost" onClick={() => togglePanel('bills')} style={{ marginLeft: '0.4rem', ...(openPanel === 'bills' ? { borderColor: 'var(--accent)', color: 'var(--text)' } : {}) }}>
+              <ListChecks size={14} style={{ marginRight: 4, verticalAlign: -2 }} />Contas pagas{' '}
+              <span className="mono" style={{ color: billsPaidCount === monthBills.length ? 'var(--success)' : 'var(--text-muted)' }}>{billsPaidCount}/{monthBills.length}</span>
+            </button>
+          )}
         </div>
 
-        {showPartners && partnersApi && (
-          <PartnersPanel
-            partnersApi={partnersApi}
-            onView={(uid) => { setShowPartners(false); onView(uid); }}
-            onClose={() => setShowPartners(false)}
+        {openPanel === 'bills' && (
+          <BillsPanel
+            bills={monthBills} selectedMonth={selectedMonth} onToggle={toggleBill} onClose={() => setOpenPanel(null)}
+            personName={personName} personColor={personColor} readOnly={readOnly}
+            filterLabel={filterPerson === 'all' ? null : personName(filterPerson)}
           />
         )}
 
-        {showCustomize && (
-          <CustomizePanel visible={visible} onChange={changeVisible} onClose={() => setShowCustomize(false)} />
+        {openPanel === 'partners' && partnersApi && (
+          <PartnersPanel
+            partnersApi={partnersApi}
+            onView={(uid) => { setOpenPanel(null); onView(uid); }}
+            onClose={() => setOpenPanel(null)}
+          />
+        )}
+
+        {openPanel === 'customize' && (
+          <CustomizePanel visible={visible} onChange={changeVisible} onClose={() => setOpenPanel(null)} />
         )}
 
         {readOnly && (
@@ -1274,20 +1335,18 @@ function OtherExpensesSection({ expenses, people, filterPerson, selectedMonth, o
                   <span style={{ width: 8, height: 8, borderRadius: '50%', background: personColor(e.personId), flexShrink: 0 }} />
                   <span style={{ color: 'var(--text-dim)' }}>{personName(e.personId)}</span>
                   <span style={{ flex: 1 }} />
-                  {e.installmentTotal > 1 && (
-                    <button
-                      onClick={() => onTogglePaid(e.id)}
-                      disabled={readOnly}
-                      style={{
-                        fontSize: '0.65rem', fontWeight: 600, letterSpacing: '0.03em', border: 'none', borderRadius: 4,
-                        padding: '0.15rem 0.45rem', cursor: readOnly ? 'default' : 'pointer',
-                        background: e.paid ? 'var(--success-bg)' : 'var(--danger-bg)', color: e.paid ? 'var(--success)' : 'var(--danger)',
-                      }}
-                      title={readOnly ? undefined : 'Clique para alternar pago/pendente'}
-                    >
-                      {e.paid ? 'PAGA' : 'PENDENTE'}
-                    </button>
-                  )}
+                  <button
+                    onClick={() => onTogglePaid(e.id, selectedMonth)}
+                    disabled={readOnly}
+                    style={{
+                      fontSize: '0.65rem', fontWeight: 600, letterSpacing: '0.03em', border: 'none', borderRadius: 4,
+                      padding: '0.15rem 0.45rem', cursor: readOnly ? 'default' : 'pointer',
+                      background: isPaidIn(e, selectedMonth) ? 'var(--success-bg)' : 'var(--danger-bg)', color: isPaidIn(e, selectedMonth) ? 'var(--success)' : 'var(--danger)',
+                    }}
+                    title={readOnly ? undefined : 'Clique para alternar pago/pendente'}
+                  >
+                    {isPaidIn(e, selectedMonth) ? 'PAGA' : 'PENDENTE'}
+                  </button>
                   <span className="mono" style={{ fontWeight: 600 }}>{money(e.amount)}</span>
                   {!readOnly && <button className="icon" onClick={() => startEdit(e)} title="Editar"><Pencil size={14} /></button>}
                   {!readOnly && <button className="icon" onClick={() => onRemove(e.id)}><Trash2 size={14} /></button>}
@@ -1532,14 +1591,14 @@ function CalendarSection({ cards, cardTransactions, otherExpenses, filterPerson,
     const amount = cardTransactions
       .filter(t => t.cardId === c.id && matchesMonth(t, selectedMonth) && inScope(t))
       .reduce((s, t) => s + Number(t.amount || 0), 0);
-    push(Math.min(c.dueDay, dim), { kind: 'card', id: `card-${c.id}`, title: `Fatura ${c.name}`, amount, paid: null });
+    push(Math.min(c.dueDay, dim), { kind: 'card', id: `card-${c.id}`, title: `Fatura ${c.name}`, amount, paid: amount > 0 ? isInvoicePaid(c, selectedMonth) : null });
   }
   for (const e of otherExpenses) {
     if (!matchesMonth(e, selectedMonth) || !inScope(e)) continue;
     const day = Math.min(Number(e.date.slice(8, 10)) || 1, dim);
     push(day, {
       kind: 'expense', id: e.id, title: e.description, amount: Number(e.amount || 0), personId: e.personId,
-      paid: e.installmentTotal > 1 ? !!e.paid : null,
+      paid: isPaidIn(e, selectedMonth),
     });
   }
 
@@ -1642,6 +1701,87 @@ function CalendarSection({ cards, cardTransactions, otherExpenses, filterPerson,
             );
           })}
         </div>
+      )}
+    </section>
+  );
+}
+
+// Painel "Contas pagas": lista as contas do mês selecionado para marcar como
+// pagas. Gastos fixos são marcados mês a mês; faturas, por cartão e mês.
+function BillsPanel({ bills, selectedMonth, onToggle, onClose, personName, personColor, readOnly, filterLabel }) {
+  const total = bills.reduce((s, b) => s + b.amount, 0);
+  const paidTotal = bills.filter(b => b.paid).reduce((s, b) => s + b.amount, 0);
+  const pct = total > 0 ? (paidTotal / total) * 100 : 0;
+  const isCurrentMonth = selectedMonth === currentMonth();
+  const todayDay = new Date().getDate();
+  const pending = bills.filter(b => !b.paid);
+  const paid = bills.filter(b => b.paid);
+
+  function row(b) {
+    const overdue = !b.paid && isCurrentMonth && b.day && b.day < todayDay;
+    return (
+      <label key={b.id} style={{
+        display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap', padding: '0.55rem 0.2rem',
+        borderBottom: '1px solid var(--border)', cursor: readOnly ? 'default' : 'pointer', fontSize: '0.88rem',
+      }}>
+        <input type="checkbox" checked={b.paid} disabled={readOnly} onChange={() => onToggle(b)}
+          style={{ width: 18, height: 18, padding: 0, accentColor: 'var(--success)', flexShrink: 0 }} />
+        <span className="mono" style={{ color: overdue ? 'var(--danger)' : 'var(--text-muted)', fontSize: '0.78rem', width: 44, flexShrink: 0 }}>
+          {b.day ? `dia ${String(b.day).padStart(2, '0')}` : '—'}
+        </span>
+        <span style={{
+          flex: '1 1 140px', minWidth: 0,
+          textDecoration: b.paid ? 'line-through' : 'none', color: b.paid ? 'var(--text-muted)' : 'var(--text)',
+        }}>
+          {b.title}
+          {b.tag && (
+            <span className="mono" style={{ marginLeft: 6, fontSize: '0.65rem', color: 'var(--text-dim)', background: 'var(--border)', borderRadius: 4, padding: '0.1rem 0.35rem' }}>{b.tag}</span>
+          )}
+          {overdue && <span style={{ marginLeft: 6, fontSize: '0.7rem', color: 'var(--danger)', fontWeight: 600 }}>venceu</span>}
+        </span>
+        {b.kind === 'expense' ? (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--text-dim)', fontSize: '0.78rem' }}>
+            <span style={{ width: 7, height: 7, borderRadius: '50%', background: personColor(b.personId) }} />{personName(b.personId)}
+          </span>
+        ) : (
+          <span style={{ color: 'var(--text-dim)', fontSize: '0.78rem' }}>cartão</span>
+        )}
+        <span className="mono" style={{ fontWeight: 600, color: b.paid ? 'var(--text-muted)' : 'var(--text)' }}>{money(b.amount)}</span>
+      </label>
+    );
+  }
+
+  return (
+    <section className="panel no-print" style={{ marginTop: '1rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
+        <h2 className="display" style={{ fontSize: '1.15rem', margin: 0, textTransform: 'none' }}>Contas de {monthLabel(selectedMonth)}</h2>
+        <button className="icon" onClick={onClose} aria-label="Fechar"><X size={16} /></button>
+      </div>
+      <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', margin: '0 0 1rem' }}>
+        {readOnly ? 'Somente leitura.' : 'Marque o que já foi pago. Gastos fixos e faturas são marcados mês a mês.'}
+        {filterLabel && <> Mostrando só as contas de <strong>{filterLabel}</strong>.</>}
+      </p>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.3rem', fontSize: '0.82rem', marginBottom: '0.35rem' }}>
+        <span>pago <span className="mono" style={{ color: 'var(--success)', fontWeight: 600 }}>{money(paidTotal)}</span> de <span className="mono">{money(total)}</span></span>
+        {total - paidTotal > 0.004 && (
+          <span style={{ color: 'var(--text-muted)' }}>falta <span className="mono" style={{ color: 'var(--text-dim)' }}>{money(total - paidTotal)}</span></span>
+        )}
+      </div>
+      <div style={{ height: 6, background: 'var(--border)', borderRadius: 3, overflow: 'hidden', marginBottom: '1rem' }}>
+        <div style={{ height: '100%', width: `${pct}%`, background: 'var(--success)', borderRadius: 3, transition: 'width 0.2s' }} />
+      </div>
+
+      <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>A pagar · {pending.length}</div>
+      {pending.length === 0
+        ? <p style={{ color: 'var(--success)', fontSize: '0.85rem', margin: '0.5rem 0 0' }}>Tudo pago neste mês.</p>
+        : <div>{pending.map(row)}</div>}
+
+      {paid.length > 0 && (
+        <>
+          <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: '1.25rem' }}>Pagas · {paid.length}</div>
+          <div>{paid.map(row)}</div>
+        </>
       )}
     </section>
   );
