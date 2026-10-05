@@ -651,18 +651,18 @@ export default function ExtratoApp({ viewing = null, onView = () => {}, partners
           </div>
         </div>
 
-        <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginTop: '1.1rem' }}>
+        <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginTop: '1.1rem', flexWrap: 'wrap' }}>
           <button className="icon" onClick={() => setSelectedMonth(m => shiftMonth(m, -1))} aria-label="Mês anterior"><ChevronLeft size={18} /></button>
           <select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} style={{ fontWeight: 600, textTransform: 'capitalize' }}>
             {availableMonths.map(m => <option key={m} value={m} style={{ textTransform: 'capitalize' }}>{monthLabel(m)}</option>)}
           </select>
           <button className="icon" onClick={() => setSelectedMonth(m => shiftMonth(m, 1))} aria-label="Próximo mês"><ChevronRight size={18} /></button>
-          {monthBills.length > 0 && (
-            <button className="ghost" onClick={() => togglePanel('bills')} style={{ marginLeft: '0.4rem', ...(openPanel === 'bills' ? { borderColor: 'var(--accent)', color: 'var(--text)' } : {}) }}>
-              <ListChecks size={14} style={{ marginRight: 4, verticalAlign: -2 }} />Contas pagas{' '}
+          <button className="ghost" onClick={() => togglePanel('bills')} style={{ marginLeft: '0.4rem', ...(openPanel === 'bills' ? { borderColor: 'var(--accent)', color: 'var(--text)' } : {}) }}>
+            <ListChecks size={14} style={{ marginRight: 4, verticalAlign: -2 }} />Contas pagas{' '}
+            {monthBills.length > 0 && (
               <span className="mono" style={{ color: billsPaidCount === monthBills.length ? 'var(--success)' : 'var(--text-muted)' }}>{billsPaidCount}/{monthBills.length}</span>
-            </button>
-          )}
+            )}
+          </button>
         </div>
 
         {openPanel === 'bills' && (
@@ -1772,6 +1772,11 @@ function BillsPanel({ bills, selectedMonth, onToggle, onClose, personName, perso
         <div style={{ height: '100%', width: `${pct}%`, background: 'var(--success)', borderRadius: 3, transition: 'width 0.2s' }} />
       </div>
 
+      {bills.length === 0 ? (
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', margin: 0 }}>
+          Nenhuma conta neste mês. As faturas dos cartões (com gastos no mês) e os outros gastos aparecem aqui para marcar como pagos.
+        </p>
+      ) : <>
       <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>A pagar · {pending.length}</div>
       {pending.length === 0
         ? <p style={{ color: 'var(--success)', fontSize: '0.85rem', margin: '0.5rem 0 0' }}>Tudo pago neste mês.</p>
@@ -1783,6 +1788,7 @@ function BillsPanel({ bills, selectedMonth, onToggle, onClose, personName, perso
           <div>{paid.map(row)}</div>
         </>
       )}
+      </>}
     </section>
   );
 }
