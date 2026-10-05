@@ -511,6 +511,12 @@ export default function ExtratoApp({ viewing = null, onView = () => {}, partners
 
   const pal = PALETTES[paletteKey] || PALETTES[DEFAULT_PALETTE];
 
+  // Barra de status do celular (e do app instalado) na cor de fundo da paleta.
+  useEffect(() => {
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', pal.bg);
+  }, [pal.bg]);
+
   if (syncState !== 'ready') {
     const btn = { border: `1px solid ${pal.borderStrong}`, borderRadius: 8, padding: '0.6rem 1rem', fontWeight: 600, fontSize: '0.875rem', cursor: 'pointer', fontFamily: 'inherit' };
     return (
@@ -709,7 +715,10 @@ export default function ExtratoApp({ viewing = null, onView = () => {}, partners
 
       <main style={{ maxWidth: 1180, margin: '0 auto', padding: '0 1.5rem', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
         {show('people') && (
-          <PeopleSection people={people} onAdd={addPerson} onRemove={removePerson} onSalary={updateSalary} personColor={personColor} readOnly={readOnly} />
+          <PeopleSection
+            people={people} onAdd={addPerson} onRemove={removePerson} onSalary={updateSalary} personColor={personColor} readOnly={readOnly}
+            entryCount={id => cardTransactions.filter(t => t.personId === id).length + otherExpenses.filter(t => t.personId === id).length}
+          />
         )}
 
         <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
@@ -772,10 +781,16 @@ export default function ExtratoApp({ viewing = null, onView = () => {}, partners
   );
 }
 
-function PeopleSection({ people, onAdd, onRemove, onSalary, personColor, readOnly }) {
+// Texto da confirmação de exclusão: avisa quantos lançamentos vão junto.
+function entriesNote(n) {
+  return n === 0 ? '' : n === 1 ? ' e 1 lançamento' : ` e ${n} lançamentos`;
+}
+
+function PeopleSection({ people, onAdd, onRemove, onSalary, personColor, readOnly, entryCount }) {
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState('');
   const [salary, setSalary] = useState('');
+  const [confirmId, setConfirmId] = useState(null);
 
   function submit() {
     onAdd(name, salary);
@@ -806,7 +821,16 @@ function PeopleSection({ people, onAdd, onRemove, onSalary, personColor, readOnl
             <span style={{ minWidth: 120, fontWeight: 500 }}>{p.name}</span>
             <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>salário</span>
             <input type="number" value={p.salary} onChange={e => onSalary(p.id, e.target.value)} style={{ width: 110 }} readOnly={readOnly} />
-            {!readOnly && <button className="icon" onClick={() => onRemove(p.id)} aria-label={`Remover ${p.name}`}><Trash2 size={15} /></button>}
+            {!readOnly && confirmId !== p.id && (
+              <button className="icon" onClick={() => setConfirmId(p.id)} aria-label={`Remover ${p.name}`}><Trash2 size={15} /></button>
+            )}
+            {!readOnly && confirmId === p.id && (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', fontSize: '0.8rem' }}>
+                <span style={{ color: 'var(--danger)' }}>Apagar {p.name}{entriesNote(entryCount(p.id))}?</span>
+                <button className="ghost" style={{ borderColor: 'var(--danger)', color: 'var(--danger)' }} onClick={() => { setConfirmId(null); onRemove(p.id); }}>Apagar</button>
+                <button className="ghost" onClick={() => setConfirmId(null)}>Cancelar</button>
+              </span>
+            )}
           </div>
         ))}
       </div>
@@ -828,6 +852,7 @@ function CardsSection({ cards, people, cardTransactions, filterPerson, selectedM
   const [limitValue, setLimitValue] = useState('');
   const [bank, setBank] = useState('');
   const [dueDay, setDueDay] = useState('');
+  const [confirmCardId, setConfirmCardId] = useState(null);
 
   function submit() {
     onAddCard(name, limitValue, bank, dueDay);
@@ -896,7 +921,7 @@ function CardsSection({ cards, people, cardTransactions, filterPerson, selectedM
                     </span>
                   )}
                   {!readOnly && (
-                    <button className="icon" style={{ color: 'rgba(255,255,255,0.6)' }} onClick={e => { e.stopPropagation(); onRemoveCard(c.id); }}>
+                    <button className="icon" style={{ color: 'rgba(255,255,255,0.6)' }} aria-label={`Remover cartão ${c.name}`} onClick={e => { e.stopPropagation(); setConfirmCardId(c.id); }}>
                       <Trash2 size={14} />
                     </button>
                   )}
@@ -914,6 +939,20 @@ function CardsSection({ cards, people, cardTransactions, filterPerson, selectedM
                 {due && (
                   <div style={{ fontSize: '0.7rem', fontWeight: 600, marginTop: '0.55rem', color: due.urgent ? '#FFB4A2' : 'rgba(255,255,255,0.75)' }}>
                     {due.text}
+                  </div>
+                )}
+                {confirmCardId === c.id && (
+                  <div onClick={e => e.stopPropagation()} style={{
+                    position: 'absolute', inset: 0, background: 'rgba(10,10,14,0.88)', cursor: 'default',
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.75rem', padding: '1rem', textAlign: 'center',
+                  }}>
+                    <span style={{ color: '#fff', fontSize: '0.85rem' }}>
+                      Apagar o cartão <strong>{c.name}</strong>{entriesNote(cardTransactions.filter(t => t.cardId === c.id).length)}?
+                    </span>
+                    <span style={{ display: 'flex', gap: '0.5rem' }}>
+                      <button className="ghost" style={{ borderColor: 'var(--danger)', color: '#FFB4A2' }} onClick={() => { setConfirmCardId(null); onRemoveCard(c.id); }}>Apagar</button>
+                      <button className="ghost" style={{ color: '#fff' }} onClick={() => setConfirmCardId(null)}>Cancelar</button>
+                    </span>
                   </div>
                 )}
               </div>
