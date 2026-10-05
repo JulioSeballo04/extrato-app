@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Trash2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Users, Pencil, Check, X, Palette, LogOut, Link2, Eye, SlidersHorizontal } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { getUserData, saveUserData, subscribeUserData } from '../lib/firestore';
+import { saveUserData, subscribeUserData } from '../lib/firestore';
 import PartnersPanel from './PartnersPanel';
 import CustomizePanel, { DEFAULT_VISIBLE } from './CustomizePanel';
 
@@ -118,11 +118,36 @@ function monthsLaterDate(dateStr, n) {
 }
 // Um lançamento "fixo" permanece valendo em todo mês a partir da data em
 // que foi criado (ex.: aluguel, assinatura), não só no mês em que foi lançado.
+// Parcelas nunca se repetem: cada uma já tem o seu mês. (Dados antigos podem ter
+// parcelas marcadas como fixas; elas contariam em dobro a cada mês seguinte.)
+function isRecurring(item) {
+  return !!item?.fixed && !(item.installmentTotal > 1);
+}
 function matchesMonth(item, month) {
   if (!item?.date || !month) return false;
   const itemMonth = item.date.slice(0, 7);
   if (itemMonth === month) return true;
-  return !!item.fixed && itemMonth < month;
+  return isRecurring(item) && itemMonth < month;
+}
+
+// JSON com as chaves em ordem: o Firestore não devolve os campos na mesma ordem
+// em que foram gravados, então isso permite comparar o estado local com o salvo.
+// Campos `undefined` somem na gravação (ignoreUndefinedProperties), então somem aqui também.
+function stableStringify(v) {
+  if (Array.isArray(v)) return `[${v.map(stableStringify).join(',')}]`;
+  if (v && typeof v === 'object') {
+    return `{${Object.keys(v).filter(k => v[k] !== undefined).sort().map(k => `${JSON.stringify(k)}:${stableStringify(v[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(v) ?? 'null';
+}
+function syncKey(data) {
+  return stableStringify({
+    people: data.people || [],
+    cards: data.cards || [],
+    cardTransactions: data.cardTransactions || [],
+    otherExpenses: data.otherExpenses || [],
+    paletteKey: PALETTES[data.paletteKey] ? data.paletteKey : DEFAULT_PALETTE,
+  });
 }
 
 // Dia de vencimento da fatura: inteiro de 1 a 31, ou 0 quando não informado.
@@ -192,7 +217,9 @@ export default function ExtratoApp({ viewing = null, onView = () => {}, partners
   const [showPartners, setShowPartners] = useState(false);
   const [showCustomize, setShowCustomize] = useState(false);
   const [visible, setVisible] = useState(DEFAULT_VISIBLE);
-  const [loaded, setLoaded] = useState(false);
+  // 'loading' até o primeiro snapshot confiável; 'failed' se nem isso veio.
+  const [syncState, setSyncState] = useState('loading');
+  const [retryCount, setRetryCount] = useState(0);
   const [people, setPeople] = useState([]);
   const [cards, setCards] = useState([]);
   const [cardTransactions, setCardTransactions] = useState([]);
@@ -203,7 +230,10 @@ export default function ExtratoApp({ viewing = null, onView = () => {}, partners
   const [storageError, setStorageError] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
   const [paletteKey, setPaletteKey] = useState(DEFAULT_PALETTE);
-  const firstLoad = useRef(true);
+  // syncKey do último estado lido do servidor ou gravado nele. Enquanto for null,
+  // nada foi carregado de verdade e o app NUNCA grava — senão um estado vazio
+  // (por erro de rede) sobrescreveria o documento inteiro na nuvem.
+  const lastSynced = useRef(null);
 
   // Preferência de quais seções mostrar: fica só neste aparelho (localStorage),
   // vale tanto para os próprios dados quanto ao ver um parceiro.
@@ -224,54 +254,66 @@ export default function ExtratoApp({ viewing = null, onView = () => {}, partners
     setCards(data.cards || []);
     setCardTransactions(data.cardTransactions || []);
     setOtherExpenses(data.otherExpenses || []);
-    if (data.paletteKey && PALETTES[data.paletteKey]) setPaletteKey(data.paletteKey);
+    setPaletteKey(PALETTES[data.paletteKey] ? data.paletteKey : DEFAULT_PALETTE);
   }
 
+  // Acompanha o documento em tempo real — o próprio ou o do parceiro. Assim uma
+  // edição feita em outro aparelho aparece aqui, em vez de ser sobrescrita pela
+  // próxima gravação deste aparelho com dados antigos.
   useEffect(() => {
     if (!dataUid) return undefined;
-    if (readOnly) {
-      // Dados de outra pessoa: acompanha em tempo real, sem semear nem salvar.
-      return subscribeUserData(
-        dataUid,
-        (data) => { if (data) applyData(data); setStorageError(false); setLoaded(true); },
-        () => { setStorageError(true); setLoaded(true); },
-      );
-    }
-    (async () => {
-      try {
-        const data = await getUserData(dataUid);
-        if (data) {
-          applyData(data);
+    return subscribeUserData(
+      dataUid,
+      (data, { fromCache }) => {
+        if (!data) {
+          // Offline, "não existe" pode ser só falta de conexão: espera o servidor
+          // em vez de tratar como conta nova (o que apagaria os dados reais).
+          if (fromCache) return;
+          // Conta nova de verdade: mostra dados de exemplo. Só vão para a nuvem
+          // quando o usuário mexer em algo. Parceiro sem dados: fica vazio.
+          if (!readOnly && lastSynced.current === null) {
+            const seed = { ...seedData(), paletteKey: DEFAULT_PALETTE };
+            applyData(seed);
+            lastSynced.current = syncKey(seed);
+            setSelectedMonth('2026-08');
+          }
+          if (readOnly) lastSynced.current = syncKey({});
         } else {
-          const seed = seedData();
-          setPeople(seed.people);
-          setCards(seed.cards);
-          setCardTransactions(seed.cardTransactions);
-          setOtherExpenses(seed.otherExpenses);
-          setSelectedMonth('2026-08');
+          const key = syncKey(data);
+          // Eco da própria gravação (ou nada mudou): não mexe no estado.
+          if (key !== lastSynced.current) {
+            lastSynced.current = key;
+            applyData(data);
+          }
         }
-      } catch (e) {
-        setStorageError(true);
-      } finally {
-        setLoaded(true);
-      }
-    })();
-    return undefined;
-  }, [dataUid, readOnly]);
+        setStorageError(false);
+        setSyncState('ready');
+      },
+      () => {
+        // Se já carregou antes, os dados na tela são válidos: só avisa. Se nunca
+        // carregou, não deixa usar o app (e portanto não deixa gravar nada).
+        if (lastSynced.current === null) setSyncState('failed');
+        else setStorageError(true);
+      },
+    );
+  }, [dataUid, readOnly, retryCount]);
 
   useEffect(() => {
-    if (!loaded || !userId || readOnly) return;
-    if (firstLoad.current) { firstLoad.current = false; return; }
+    if (syncState !== 'ready' || !userId || readOnly || lastSynced.current === null) return;
     const data = { people, cards, cardTransactions, otherExpenses, paletteKey };
-    (async () => {
-      try {
-        await saveUserData(userId, data);
-        setStorageError(false);
-      } catch (e) {
-        setStorageError(true);
-      }
-    })();
-  }, [people, cards, cardTransactions, otherExpenses, paletteKey, loaded, userId]);
+    const key = syncKey(data);
+    if (key === lastSynced.current) return;
+    lastSynced.current = key;
+    saveUserData(userId, data).then(
+      () => setStorageError(false),
+      () => setStorageError(true),
+    );
+  }, [people, cards, cardTransactions, otherExpenses, paletteKey, syncState, userId, readOnly]);
+
+  function retryLoad() {
+    setSyncState('loading');
+    setRetryCount(n => n + 1);
+  }
 
   function personTotal(personId, month) {
     const cardSum = cardTransactions.filter(t => t.personId === personId && (!month || matchesMonth(t, month))).reduce((s, t) => s + Number(t.amount || 0), 0);
@@ -339,7 +381,7 @@ export default function ExtratoApp({ viewing = null, onView = () => {}, partners
         description: tx.description.trim(),
         amount: perInstallmentAmount,
         date: monthsLaterDate(tx.date, i - paidCount),
-        fixed: !!tx.fixed,
+        fixed: total === 1 && !!tx.fixed,
         category: tx.category || DEFAULT_CATEGORY,
         installmentNumber: i + 1,
         installmentTotal: total,
@@ -363,7 +405,7 @@ export default function ExtratoApp({ viewing = null, onView = () => {}, partners
       amount: Number(patch.amount) || 0,
       date: patch.date || x.date,
       personId: patch.personId || x.personId,
-      fixed: !!patch.fixed,
+      fixed: !(x.installmentTotal > 1) && !!patch.fixed,
       category: patch.category || x.category || DEFAULT_CATEGORY,
     } : x));
   }
@@ -387,7 +429,7 @@ export default function ExtratoApp({ viewing = null, onView = () => {}, partners
         description: exp.description.trim(),
         amount: perInstallmentAmount,
         date: monthsLaterDate(exp.date, i - paidCount),
-        fixed: !!exp.fixed,
+        fixed: total === 1 && !!exp.fixed,
         category: exp.category || DEFAULT_CATEGORY,
         installmentNumber: i + 1,
         installmentTotal: total,
@@ -411,7 +453,7 @@ export default function ExtratoApp({ viewing = null, onView = () => {}, partners
       amount: Number(patch.amount) || 0,
       date: patch.date || x.date,
       personId: patch.personId || x.personId,
-      fixed: !!patch.fixed,
+      fixed: !(x.installmentTotal > 1) && !!patch.fixed,
       category: patch.category || x.category || DEFAULT_CATEGORY,
     } : x));
   }
@@ -422,10 +464,28 @@ export default function ExtratoApp({ viewing = null, onView = () => {}, partners
 
   const pal = PALETTES[paletteKey] || PALETTES[DEFAULT_PALETTE];
 
-  if (!loaded) {
+  if (syncState !== 'ready') {
+    const btn = { border: `1px solid ${pal.borderStrong}`, borderRadius: 8, padding: '0.6rem 1rem', fontWeight: 600, fontSize: '0.875rem', cursor: 'pointer', fontFamily: 'inherit' };
     return (
-      <div style={{ minHeight: '100vh', background: pal.bg, color: pal.textDim, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'Inter, sans-serif' }}>
-        Carregando extrato…
+      <div style={{ minHeight: '100vh', background: pal.bg, color: pal.textDim, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'Inter, sans-serif', padding: '1rem' }}>
+        {syncState === 'loading' ? 'Carregando extrato…' : (
+          <div style={{ maxWidth: 380, background: pal.panel, border: `1px solid ${pal.border}`, borderRadius: 16, padding: '2rem', textAlign: 'center' }}>
+            <div style={{ color: pal.text, fontWeight: 600, fontSize: '1.05rem', marginBottom: '0.5rem' }}>
+              {readOnly ? 'Não consegui carregar os gastos dessa pessoa' : 'Não consegui carregar seus dados'}
+            </div>
+            <div style={{ fontSize: '0.85rem', marginBottom: '1.25rem' }}>
+              {readOnly
+                ? 'O vínculo pode ter sido desfeito, ou as regras do Firestore ainda não foram publicadas.'
+                : 'Verifique sua conexão e tente de novo. Seus dados continuam salvos na nuvem.'}
+            </div>
+            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+              <button onClick={retryLoad} style={{ ...btn, background: pal.accent, color: pal.bg, border: 'none' }}>Tentar de novo</button>
+              {readOnly
+                ? <button onClick={() => onView(null)} style={{ ...btn, background: 'transparent', color: pal.textDim }}>Voltar aos meus gastos</button>
+                : <button onClick={logout} style={{ ...btn, background: 'transparent', color: pal.textDim }}>Sair</button>}
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -580,8 +640,8 @@ export default function ExtratoApp({ viewing = null, onView = () => {}, partners
         {storageError && (
           <p style={{ color: 'var(--danger)', fontSize: '0.8rem', marginTop: '0.5rem' }}>
             {readOnly
-              ? 'Não consegui carregar os gastos dessa pessoa. O vínculo pode ter sido desfeito, ou as regras do Firestore ainda não foram publicadas.'
-              : 'Não consegui sincronizar seus dados com o servidor agora. Verifique sua conexão.'}
+              ? 'Parei de receber as atualizações dessa pessoa. O vínculo pode ter sido desfeito.'
+              : 'Não consegui sincronizar seus dados com o servidor agora. Recarregue a página para ver mudanças feitas em outros aparelhos.'}
           </p>
         )}
       </header>
@@ -876,7 +936,7 @@ function CardLedger({ card, people, transactions, monthTransactions, selectedMon
     setEditingId(null); setEditDraft(null);
   }
 
-  const fixedTotal = transactions.filter(t => t.fixed && matchesMonth(t, selectedMonth)).reduce((s, t) => s + Number(t.amount || 0), 0);
+  const fixedTotal = transactions.filter(t => isRecurring(t) && matchesMonth(t, selectedMonth)).reduce((s, t) => s + Number(t.amount || 0), 0);
   const sorted = [...transactions].sort((a, b) => (a.date < b.date ? 1 : -1));
   const spentByPerson = people
     .map(p => ({ person: p, total: monthTransactions.filter(t => t.personId === p.id).reduce((s, t) => s + Number(t.amount || 0), 0) }))
@@ -924,7 +984,7 @@ function CardLedger({ card, people, transactions, monthTransactions, selectedMon
           </select>
           <input type="date" value={date} onChange={e => setDate(e.target.value)} />
           <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem', color: 'var(--text-dim)', cursor: 'pointer' }}>
-            <input type="checkbox" checked={fixed} onChange={e => setFixed(e.target.checked)} style={{ width: 'auto', padding: 0 }} />
+            <input type="checkbox" checked={fixed && installmentsNum === 1} disabled={installmentsNum > 1} title={installmentsNum > 1 ? "Parcelas já caem uma por mês; \"fixo\" vale só para gastos sem parcelas" : undefined} onChange={e => setFixed(e.target.checked)} style={{ width: 'auto', padding: 0 }} />
             fixo
           </label>
           <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.78rem', color: 'var(--text-dim)' }}>
@@ -992,7 +1052,7 @@ function CardLedger({ card, people, transactions, monthTransactions, selectedMon
                 </select>
                 <input type="number" value={editDraft.amount} onChange={e => setEditDraft(d => ({ ...d, amount: e.target.value }))} style={{ width: 90 }} />
                 <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.75rem', color: 'var(--text-dim)', cursor: 'pointer' }}>
-                  <input type="checkbox" checked={editDraft.fixed} onChange={e => setEditDraft(d => ({ ...d, fixed: e.target.checked }))} style={{ width: 'auto', padding: 0 }} />
+                  <input type="checkbox" checked={editDraft.fixed && !(t.installmentTotal > 1)} disabled={t.installmentTotal > 1} onChange={e => setEditDraft(d => ({ ...d, fixed: e.target.checked }))} style={{ width: 'auto', padding: 0 }} />
                   fixo
                 </label>
                 <button className="icon" onClick={() => saveEdit(t.id)} title="Salvar" style={{ color: 'var(--success)' }}><Check size={16} /></button>
@@ -1028,7 +1088,7 @@ function CardLedger({ card, people, transactions, monthTransactions, selectedMon
                   <span style={{ fontSize: '0.65rem', color: 'var(--text-dim)', background: 'var(--border)', borderRadius: 4, padding: '0.1rem 0.4rem' }}>
                     {t.category || DEFAULT_CATEGORY}
                   </span>
-                  {t.fixed && (
+                  {isRecurring(t) && (
                     <span style={{ fontSize: '0.65rem', color: 'var(--bg)', background: 'var(--accent)', borderRadius: 4, padding: '0.1rem 0.4rem', fontWeight: 600, letterSpacing: '0.03em' }}>FIXO</span>
                   )}
                   {t.installmentTotal > 1 && (
@@ -1099,9 +1159,9 @@ function OtherExpensesSection({ expenses, people, filterPerson, selectedMonth, o
     setEditingId(null); setEditDraft(null);
   }
 
-  const fixedTotal = expenses.filter(e => e.fixed && matchesMonth(e, selectedMonth)).reduce((s, e) => s + Number(e.amount || 0), 0);
+  const fixedTotal = expenses.filter(e => isRecurring(e) && matchesMonth(e, selectedMonth)).reduce((s, e) => s + Number(e.amount || 0), 0);
 
-  const filtered = expenses.filter(e => matchesMonth(e, selectedMonth) && (filterPerson === 'all' || e.personId === filterPerson) && (!onlyFixed || e.fixed))
+  const filtered = expenses.filter(e => matchesMonth(e, selectedMonth) && (filterPerson === 'all' || e.personId === filterPerson) && (!onlyFixed || isRecurring(e)))
     .sort((a, b) => (a.date < b.date ? 1 : -1));
 
   return (
@@ -1133,7 +1193,7 @@ function OtherExpensesSection({ expenses, people, filterPerson, selectedMonth, o
           </select>
           <input type="date" value={date} onChange={e => setDate(e.target.value)} />
           <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem', color: 'var(--text-dim)', cursor: 'pointer' }}>
-            <input type="checkbox" checked={fixed} onChange={e => setFixed(e.target.checked)} style={{ width: 'auto', padding: 0 }} />
+            <input type="checkbox" checked={fixed && installmentsNum === 1} disabled={installmentsNum > 1} title={installmentsNum > 1 ? "Parcelas já caem uma por mês; \"fixo\" vale só para gastos sem parcelas" : undefined} onChange={e => setFixed(e.target.checked)} style={{ width: 'auto', padding: 0 }} />
             fixo
           </label>
           <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.78rem', color: 'var(--text-dim)' }}>
@@ -1201,7 +1261,7 @@ function OtherExpensesSection({ expenses, people, filterPerson, selectedMonth, o
                 </select>
                 <input type="number" value={editDraft.amount} onChange={ev => setEditDraft(d => ({ ...d, amount: ev.target.value }))} style={{ width: 90 }} />
                 <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.75rem', color: 'var(--text-dim)', cursor: 'pointer' }}>
-                  <input type="checkbox" checked={editDraft.fixed} onChange={ev => setEditDraft(d => ({ ...d, fixed: ev.target.checked }))} style={{ width: 'auto', padding: 0 }} />
+                  <input type="checkbox" checked={editDraft.fixed && !(e.installmentTotal > 1)} disabled={e.installmentTotal > 1} onChange={ev => setEditDraft(d => ({ ...d, fixed: ev.target.checked }))} style={{ width: 'auto', padding: 0 }} />
                   fixo
                 </label>
                 <button className="icon" onClick={() => saveEdit(e.id)} title="Salvar" style={{ color: 'var(--success)' }}><Check size={16} /></button>
@@ -1237,7 +1297,7 @@ function OtherExpensesSection({ expenses, people, filterPerson, selectedMonth, o
                   <span style={{ fontSize: '0.65rem', color: 'var(--text-dim)', background: 'var(--border)', borderRadius: 4, padding: '0.1rem 0.4rem' }}>
                     {e.category || DEFAULT_CATEGORY}
                   </span>
-                  {e.fixed && (
+                  {isRecurring(e) && (
                     <span style={{ fontSize: '0.65rem', color: 'var(--bg)', background: 'var(--accent)', borderRadius: 4, padding: '0.1rem 0.4rem', fontWeight: 600, letterSpacing: '0.03em' }}>FIXO</span>
                   )}
                   {e.installmentTotal > 1 && (
@@ -1319,7 +1379,7 @@ function ReportSection({ people, cards, cardTransactions, otherExpenses, selecte
       .map(t => ({ ...t, source: cardName(t.cardId) }));
     const otherMoves = otherExpenses
       .filter(t => t.personId === personId && matchesMonth(t, selectedMonth))
-      .map(t => ({ ...t, source: t.fixed ? 'Gasto fixo' : 'Outro gasto' }));
+      .map(t => ({ ...t, source: isRecurring(t) ? 'Gasto fixo' : 'Outro gasto' }));
     return [...cardMoves, ...otherMoves].sort((a, b) => (a.date < b.date ? 1 : -1));
   }
 
