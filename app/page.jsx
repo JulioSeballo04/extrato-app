@@ -4,15 +4,14 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../context/AuthContext';
 import ExtratoApp from '../components/ExtratoApp';
-import { usePartners } from '../lib/partners';
+import { useSpaces } from '../lib/spaces';
 
 export default function Home() {
   const { user, loading, logout, resendVerificationEmail, refreshUser } = useAuth();
   const router = useRouter();
   const [checking, setChecking] = useState(false);
   const [resent, setResent] = useState(false);
-  const partnersApi = usePartners(user);
-  const [viewUid, setViewUid] = useState(null);
+  const spacesApi = useSpaces(user?.emailVerified ? user : null);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -94,15 +93,28 @@ export default function Home() {
     );
   }
 
-  // Se o vínculo for desfeito enquanto se vê o parceiro, volta para os próprios dados.
-  const viewing = partnersApi.partners.find(p => p.uid === viewUid) || null;
+  // Primeiro acesso no modelo novo: cria o espaço e migra os dados antigos.
+  if (spacesApi.status === 'loading' || (spacesApi.status === 'ready' && !spacesApi.active)) {
+    return <div style={screenStyle}>Preparando seus dados…</div>;
+  }
 
-  return (
-    <ExtratoApp
-      key={viewing ? viewing.uid : 'me'}
-      viewing={viewing}
-      onView={setViewUid}
-      partnersApi={partnersApi}
-    />
-  );
+  if (spacesApi.status === 'failed') {
+    return (
+      <div style={screenStyle}>
+        <div style={{ maxWidth: 380, background: '#171A21', border: '1px solid #22262F', borderRadius: 16, padding: '2rem', textAlign: 'center' }}>
+          <div style={{ color: '#EDEDEF', fontWeight: 600, fontSize: '1.05rem', marginBottom: '0.5rem' }}>Não consegui carregar seus dados</div>
+          <div style={{ fontSize: '0.85rem', marginBottom: '1.25rem' }}>Verifique sua conexão e tente de novo. Seus dados continuam salvos na nuvem.</div>
+          <button
+            onClick={spacesApi.retry}
+            style={{ width: '100%', background: '#C9A227', color: '#0F1115', border: 'none', borderRadius: 8, padding: '0.7rem', fontWeight: 600, fontSize: '0.9rem', cursor: 'pointer', marginBottom: '0.6rem' }}
+          >
+            Tentar de novo
+          </button>
+          <button onClick={logout} style={{ background: 'none', border: 'none', color: '#6B7280', fontSize: '0.82rem', cursor: 'pointer' }}>Sair</button>
+        </div>
+      </div>
+    );
+  }
+
+  return <ExtratoApp spacesApi={spacesApi} />;
 }

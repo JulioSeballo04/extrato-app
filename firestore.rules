@@ -1,5 +1,7 @@
 rules_version = '2';
 
+// Modelo por espaço (ver lib/spaces.js). Tudo que não está liberado aqui é
+// negado — inclusive as coleções antigas `links` e `invites`.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -7,37 +9,182 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // Cada usuário lê e escreve no próprio documento (users/{uid}). Quem tem
-    // um vínculo com ele em `links` pode apenas LER — nunca escrever.
+    function spaceData(spaceId) {
+      return get(/databases/$(database)/documents/spaces/$(spaceId)).data;
+    }
+
+    function isMember(spaceId) {
+      return signedIn() && request.auth.uid in spaceData(spaceId).members;
+    }
+
+    function canEdit(spaceId) {
+      return signedIn() && spaceData(spaceId).roles[request.auth.uid] in ['owner', 'editor'];
+    }
+
+    function isMonthList(v) {
+      return v is list && v.size() <= 240;
+    }
+
+    function isDate(v) {
+      return v is string && v.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$');
+    }
+
+    function isIdString(v) {
+      return v is string && v.size() <= 64;
+    }
+
+    // ---- Preferências do usuário (espaço ativo, paleta). Também guarda a
+    // cópia dos dados do formato antigo, que só o próprio usuário lê.
+    // Depois de migrado (spacesVersion), uma aba antiga do app — que grava o
+    // documento inteiro sem esse campo — é bloqueada, para não desfazer a migração.
     match /users/{uid} {
-      allow read, write: if signedIn() && request.auth.uid == uid;
-      allow read: if signedIn() && (
-        exists(/databases/$(database)/documents/links/$(uid + '_' + request.auth.uid)) ||
-        exists(/databases/$(database)/documents/links/$(request.auth.uid + '_' + uid))
-      );
+      allow read, delete: if signedIn() && request.auth.uid == uid;
+      allow write: if signedIn() && request.auth.uid == uid
+        && (resource == null || !('spacesVersion' in resource.data)
+            || request.resource.data.get('spacesVersion', 0) == resource.data.spacesVersion);
     }
 
-    // Convites: código aleatório gerado por quem quer vincular. Só dá para
-    // buscar um convite pelo código exato (não há listagem).
-    match /invites/{code} {
-      allow get: if signedIn();
-      allow create: if signedIn() && request.resource.data.owner == request.auth.uid;
-      allow delete: if signedIn();
+    // ---- Espaços
+    function validSpace(d) {
+      return d.name is string && d.name.size() >= 1 && d.name.size() <= 60
+        && d.ownerId is string
+        && d.members is list && d.members.size() >= 1 && d.members.size() <= 10
+        && d.ownerId in d.members
+        && d.roles is map && d.roles.keys().toSet() == d.members.toSet()
+        && d.roles[d.ownerId] == 'owner'
+        && d.labels is map && d.labels.size() <= 10;
     }
 
-    // Vínculo entre dois usuários. O id é `uidA_uidB` (uids em ordem
-    // alfabética) e só pode ser criado por quem apresenta um convite válido
-    // (não expirado) do outro membro.
-    match /links/{linkId} {
-      allow read, delete: if signedIn() && request.auth.uid in resource.data.members;
+    match /spaces/{spaceId} {
+      allow read: if signedIn() && request.auth.uid in resource.data.members;
+
+      // Só a própria pessoa como membro. O espaço pessoal `home_<uid>` só pode
+      // ser criado pelo próprio dono (ninguém "ocupa" o id de outra pessoa).
       allow create: if signedIn()
-        && request.resource.data.members.size() == 2
-        && request.auth.uid in request.resource.data.members
-        && request.resource.data.members[0] < request.resource.data.members[1]
-        && linkId == request.resource.data.members[0] + '_' + request.resource.data.members[1]
-        && get(/databases/$(database)/documents/invites/$(request.resource.data.code)).data.owner in request.resource.data.members
-        && get(/databases/$(database)/documents/invites/$(request.resource.data.code)).data.owner != request.auth.uid
-        && request.time < get(/databases/$(database)/documents/invites/$(request.resource.data.code)).data.expiresAt;
+        && validSpace(request.resource.data)
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.members == [request.auth.uid]
+        && (!spaceId.matches('^home_.*') || spaceId == 'home_' + request.auth.uid);
+
+      // Dono: renomeia, muda papéis e remove membros (nunca adiciona alguém).
+      allow update: if signedIn()
+        && resource.data.ownerId == request.auth.uid
+        && request.resource.data.ownerId == resource.data.ownerId
+        && validSpace(request.resource.data)
+        && request.resource.data.members.toSet().difference(resource.data.members.toSet()).size() == 0;
+
+      // Entrar com convite: só se adiciona a si mesmo, com o papel do convite,
+      // e o convite precisa ser apagado no mesmo lote (uso único).
+      allow update: if signedIn()
+        && !(request.auth.uid in resource.data.members)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members', 'roles', 'labels', 'joinCode'])
+        && request.resource.data.members.toSet() == resource.data.members.toSet().union([request.auth.uid].toSet())
+        && request.resource.data.members.size() == resource.data.members.size() + 1
+        && request.resource.data.members.size() <= 10
+        && request.resource.data.roles.diff(resource.data.roles).affectedKeys().hasOnly([request.auth.uid])
+        && request.resource.data.labels.diff(resource.data.labels).affectedKeys().hasOnly([request.auth.uid])
+        && request.resource.data.labels[request.auth.uid] is string
+        && request.resource.data.labels[request.auth.uid].size() <= 100
+        && get(/databases/$(database)/documents/spaceInvites/$(request.resource.data.joinCode)).data.spaceId == spaceId
+        && request.resource.data.roles[request.auth.uid] == get(/databases/$(database)/documents/spaceInvites/$(request.resource.data.joinCode)).data.role
+        && request.time < get(/databases/$(database)/documents/spaceInvites/$(request.resource.data.joinCode)).data.expiresAt
+        && !existsAfter(/databases/$(database)/documents/spaceInvites/$(request.resource.data.joinCode));
+
+      // Sair do espaço: um membro (não o dono) remove só a si mesmo.
+      allow update: if signedIn()
+        && request.auth.uid in resource.data.members
+        && request.auth.uid != resource.data.ownerId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members', 'roles', 'labels'])
+        && request.resource.data.members.toSet() == resource.data.members.toSet().difference([request.auth.uid].toSet())
+        && request.resource.data.roles.diff(resource.data.roles).affectedKeys().hasOnly([request.auth.uid])
+        && !(request.auth.uid in request.resource.data.roles)
+        && request.resource.data.labels.diff(resource.data.labels).affectedKeys().hasOnly([request.auth.uid]);
+
+      allow delete: if signedIn() && resource.data.ownerId == request.auth.uid && !spaceId.matches('^home_.*');
+
+      // ---- Itens do espaço: membros leem; dono e editores gravam.
+      function validPerson(d) {
+        return d.keys().hasOnly(['name', 'salary', 'order'])
+          && d.name is string && d.name.size() >= 1 && d.name.size() <= 80
+          && d.salary is number && d.salary >= 0
+          && (!('order' in d) || d.order is number);
+      }
+
+      function validCard(d) {
+        return d.keys().hasOnly(['name', 'limitValue', 'bank', 'dueDay', 'paidInvoices', 'order'])
+          && d.name is string && d.name.size() >= 1 && d.name.size() <= 60
+          && d.limitValue is number && d.limitValue >= 0
+          && d.bank is string && d.bank.size() <= 30
+          && d.dueDay is int && d.dueDay >= 0 && d.dueDay <= 31
+          && isMonthList(d.paidInvoices)
+          && (!('order' in d) || d.order is number);
+      }
+
+      function validEntry(d) {
+        return isIdString(d.personId)
+          && d.description is string && d.description.size() >= 1 && d.description.size() <= 200
+          && d.amount is number
+          && isDate(d.date)
+          && d.fixed is bool
+          && d.category is string && d.category.size() <= 40
+          && d.installmentNumber is int && d.installmentNumber >= 1
+          && d.installmentTotal is int && d.installmentTotal >= 1 && d.installmentTotal <= 480
+          && d.paid is bool
+          && (!('installmentGroupId' in d) || isIdString(d.installmentGroupId))
+          && (!('splitGroupId' in d) || isIdString(d.splitGroupId))
+          && (!('splitCount' in d) || (d.splitCount is int && d.splitCount >= 2 && d.splitCount <= 20));
+      }
+
+      match /people/{id} {
+        allow read: if isMember(spaceId);
+        allow create, update: if canEdit(spaceId) && validPerson(request.resource.data);
+        allow delete: if canEdit(spaceId);
+      }
+
+      match /cards/{id} {
+        allow read: if isMember(spaceId);
+        allow create, update: if canEdit(spaceId) && validCard(request.resource.data);
+        allow delete: if canEdit(spaceId);
+      }
+
+      match /cardTransactions/{id} {
+        allow read: if isMember(spaceId);
+        allow create, update: if canEdit(spaceId)
+          && request.resource.data.keys().hasOnly(['cardId', 'personId', 'description', 'amount', 'date', 'fixed', 'category',
+               'installmentNumber', 'installmentTotal', 'installmentGroupId', 'splitGroupId', 'splitCount', 'paid'])
+          && isIdString(request.resource.data.cardId)
+          && validEntry(request.resource.data);
+        allow delete: if canEdit(spaceId);
+      }
+
+      match /otherExpenses/{id} {
+        allow read: if isMember(spaceId);
+        allow create, update: if canEdit(spaceId)
+          && request.resource.data.keys().hasOnly(['personId', 'description', 'amount', 'date', 'fixed', 'category',
+               'installmentNumber', 'installmentTotal', 'installmentGroupId', 'splitGroupId', 'splitCount', 'paid', 'paidMonths'])
+          && isMonthList(request.resource.data.paidMonths)
+          && validEntry(request.resource.data);
+        allow delete: if canEdit(spaceId);
+      }
+    }
+
+    // ---- Convites: só o dono do espaço cria; vale no máximo 24 h e é apagado
+    // quando alguém entra (ver a regra de entrada acima). Busca só pelo código.
+    match /spaceInvites/{code} {
+      allow get: if signedIn();
+      allow create: if signedIn()
+        && code.size() >= 10
+        && request.resource.data.keys().hasOnly(['spaceId', 'spaceName', 'role', 'createdBy', 'expiresAt', 'createdAt'])
+        && request.resource.data.createdBy == request.auth.uid
+        && spaceData(request.resource.data.spaceId).ownerId == request.auth.uid
+        && request.resource.data.role in ['editor', 'viewer']
+        && request.resource.data.spaceName is string && request.resource.data.spaceName.size() <= 60
+        && request.resource.data.expiresAt is timestamp
+        && request.resource.data.expiresAt < request.time + duration.value(25, 'h');
+      allow delete: if signedIn() && (
+        resource.data.createdBy == request.auth.uid ||
+        request.auth.uid in getAfter(/databases/$(database)/documents/spaces/$(resource.data.spaceId)).data.members
+      );
     }
   }
 }

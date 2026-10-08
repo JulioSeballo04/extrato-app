@@ -3,8 +3,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Trash2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Users, Pencil, Check, X, Palette, LogOut, Link2, Eye, SlidersHorizontal, ListChecks } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { saveUserData, subscribeUserData } from '../lib/firestore';
-import PartnersPanel from './PartnersPanel';
+import { spaceStore, subscribeSpaceData, newId } from '../lib/spaces';
+import SpacePanel from './SpacePanel';
 import CustomizePanel, { DEFAULT_VISIBLE } from './CustomizePanel';
 
 const VISIBLE_SECTIONS_KEY = 'gestor-de-gastos:secoes-visiveis';
@@ -75,10 +75,6 @@ const BANKS = {
   portoseguro: { label: 'Porto Seguro', gradient: ['#003057', '#0058A3'], chip: '#BFDCFF', mono: 'PS' },
 };
 
-function uid() {
-  return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
-}
-
 function money(v) {
   return (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
@@ -128,11 +124,6 @@ function isRecurring(item) {
 function isPaidIn(item, month) {
   return isRecurring(item) ? (item.paidMonths || []).includes(month) : !!item.paid;
 }
-function togglePaidIn(item, month) {
-  if (!isRecurring(item)) return { ...item, paid: !item.paid };
-  const months = item.paidMonths || [];
-  return { ...item, paidMonths: months.includes(month) ? months.filter(m => m !== month) : [...months, month] };
-}
 // Fatura do cartão: marcada como paga por mês, no próprio cartão.
 function isInvoicePaid(card, month) {
   return (card.paidInvoices || []).includes(month);
@@ -142,26 +133,6 @@ function matchesMonth(item, month) {
   const itemMonth = item.date.slice(0, 7);
   if (itemMonth === month) return true;
   return isRecurring(item) && itemMonth < month;
-}
-
-// JSON com as chaves em ordem: o Firestore não devolve os campos na mesma ordem
-// em que foram gravados, então isso permite comparar o estado local com o salvo.
-// Campos `undefined` somem na gravação (ignoreUndefinedProperties), então somem aqui também.
-function stableStringify(v) {
-  if (Array.isArray(v)) return `[${v.map(stableStringify).join(',')}]`;
-  if (v && typeof v === 'object') {
-    return `{${Object.keys(v).filter(k => v[k] !== undefined).sort().map(k => `${JSON.stringify(k)}:${stableStringify(v[k])}`).join(',')}}`;
-  }
-  return JSON.stringify(v) ?? 'null';
-}
-function syncKey(data) {
-  return stableStringify({
-    people: data.people || [],
-    cards: data.cards || [],
-    cardTransactions: data.cardTransactions || [],
-    otherExpenses: data.otherExpenses || [],
-    paletteKey: PALETTES[data.paletteKey] ? data.paletteKey : DEFAULT_PALETTE,
-  });
 }
 
 // Dia de vencimento da fatura: inteiro de 1 a 31, ou 0 quando não informado.
@@ -198,58 +169,33 @@ function dueLabel(dueDay) {
   return { text: `Vence dia ${String(next.getDate()).padStart(2, '0')} · ${when}`, urgent: n <= 3 };
 }
 
-function seedData() {
-  const p1 = uid(), p2 = uid();
-  const c1 = uid();
-  return {
-    people: [
-      { id: p1, name: 'Você', salary: 4500 },
-      { id: p2, name: 'Parceiro(a)', salary: 3200 },
-    ],
-    cards: [{ id: c1, name: 'Cartão Principal', limitValue: 5000 }],
-    cardTransactions: [
-      { id: uid(), cardId: c1, personId: p1, description: 'Supermercado', amount: 320.5, date: '2026-08-03', category: 'Mercado' },
-      { id: uid(), cardId: c1, personId: p2, description: 'Farmácia', amount: 89.9, date: '2026-08-07', category: 'Saúde' },
-      { id: uid(), cardId: c1, personId: p1, description: 'Assinatura streaming', amount: 39.9, date: '2026-08-10', category: 'Assinaturas' },
-    ],
-    otherExpenses: [
-      { id: uid(), personId: p1, description: 'Aluguel', amount: 1200, date: '2026-08-05', fixed: true, category: 'Contas fixas' },
-      { id: uid(), personId: p2, description: 'Academia', amount: 110, date: '2026-08-05', fixed: true, category: 'Lazer' },
-    ],
-  };
-}
+const EMPTY_DATA = { people: [], cards: [], cardTransactions: [], otherExpenses: [] };
 
-// `viewing` (opcional) é um parceiro vinculado ({ uid, label }): nesse caso o app
-// mostra os dados dele em modo somente leitura, sem salvar nada.
-export default function ExtratoApp({ viewing = null, onView = () => {}, partnersApi }) {
+// Mostra os dados do espaço ativo (ver lib/spaces.js). Cada alteração grava só
+// o item mexido; o Firestore já reflete a mudança na tela na hora (e desfaz
+// sozinho se a gravação for negada), então não há estado local para salvar.
+export default function ExtratoApp({ spacesApi }) {
   const { user, logout } = useAuth();
-  const readOnly = !!viewing;
-  const dataUid = viewing ? viewing.uid : user?.uid;
-  const userId = user?.uid;
+  const { active: space, role, spaces, profile } = spacesApi;
+  const spaceId = space?.id;
+  const readOnly = role === 'viewer';
 
-  const partners = partnersApi?.partners || [];
-  const [openPanel, setOpenPanel] = useState(null); // 'partners' | 'customize' | 'bills' | null
+  const [openPanel, setOpenPanel] = useState(null); // 'space' | 'customize' | 'bills' | null
   const [visible, setVisible] = useState(DEFAULT_VISIBLE);
-  // 'loading' até o primeiro snapshot confiável; 'failed' se nem isso veio.
+  // 'loading' até chegarem os dados do espaço; 'failed' se a leitura falhar.
   const [syncState, setSyncState] = useState('loading');
   const [retryCount, setRetryCount] = useState(0);
-  const [people, setPeople] = useState([]);
-  const [cards, setCards] = useState([]);
-  const [cardTransactions, setCardTransactions] = useState([]);
-  const [otherExpenses, setOtherExpenses] = useState([]);
+  const [data, setData] = useState(EMPTY_DATA);
   const [filterPerson, setFilterPerson] = useState('all');
   const [selectedMonth, setSelectedMonth] = useState(currentMonth());
   const [expandedCard, setExpandedCard] = useState(null);
   const [storageError, setStorageError] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
-  const [paletteKey, setPaletteKey] = useState(DEFAULT_PALETTE);
-  // syncKey do último estado lido do servidor ou gravado nele. Enquanto for null,
-  // nada foi carregado de verdade e o app NUNCA grava — senão um estado vazio
-  // (por erro de rede) sobrescreveria o documento inteiro na nuvem.
-  const lastSynced = useRef(null);
+  const paletteKey = PALETTES[profile.paletteKey] ? profile.paletteKey : DEFAULT_PALETTE;
+  const { people, cards, cardTransactions, otherExpenses } = data;
+  const store = spaceId ? spaceStore(spaceId) : null;
 
-  // Preferência de quais seções mostrar: fica só neste aparelho (localStorage),
-  // vale tanto para os próprios dados quanto ao ver um parceiro.
+  // Preferência de quais seções mostrar: fica só neste aparelho (localStorage).
   useEffect(() => {
     try {
       const raw = localStorage.getItem(VISIBLE_SECTIONS_KEY);
@@ -265,70 +211,31 @@ export default function ExtratoApp({ viewing = null, onView = () => {}, partners
     setOpenPanel(p => (p === name ? null : name));
   }
 
-  function applyData(data) {
-    setPeople(data.people || []);
-    setCards(data.cards || []);
-    setCardTransactions(data.cardTransactions || []);
-    setOtherExpenses(data.otherExpenses || []);
-    setPaletteKey(PALETTES[data.paletteKey] ? data.paletteKey : DEFAULT_PALETTE);
-  }
-
-  // Acompanha o documento em tempo real — o próprio ou o do parceiro. Assim uma
-  // edição feita em outro aparelho aparece aqui, em vez de ser sobrescrita pela
-  // próxima gravação deste aparelho com dados antigos.
+  const loadedOnce = useRef(false);
   useEffect(() => {
-    if (!dataUid) return undefined;
-    return subscribeUserData(
-      dataUid,
-      (data, { fromCache }) => {
-        if (!data) {
-          // Offline, "não existe" pode ser só falta de conexão: espera o servidor
-          // em vez de tratar como conta nova (o que apagaria os dados reais).
-          if (fromCache) return;
-          // Conta nova de verdade: mostra dados de exemplo. Só vão para a nuvem
-          // quando o usuário mexer em algo. Parceiro sem dados: fica vazio.
-          if (!readOnly && lastSynced.current === null) {
-            const seed = { ...seedData(), paletteKey: DEFAULT_PALETTE };
-            applyData(seed);
-            lastSynced.current = syncKey(seed);
-            setSelectedMonth('2026-08');
-          }
-          if (readOnly) lastSynced.current = syncKey({});
-        } else {
-          const key = syncKey(data);
-          // Eco da própria gravação (ou nada mudou): não mexe no estado.
-          if (key !== lastSynced.current) {
-            lastSynced.current = key;
-            applyData(data);
-          }
-        }
-        setStorageError(false);
-        setSyncState('ready');
-      },
-      () => {
-        // Se já carregou antes, os dados na tela são válidos: só avisa. Se nunca
-        // carregou, não deixa usar o app (e portanto não deixa gravar nada).
-        if (lastSynced.current === null) setSyncState('failed');
-        else setStorageError(true);
-      },
+    if (!spaceId) return undefined;
+    loadedOnce.current = false;
+    setSyncState('loading');
+    setData(EMPTY_DATA);
+    setFilterPerson('all');
+    setExpandedCard(null);
+    return subscribeSpaceData(
+      spaceId,
+      (next) => { loadedOnce.current = true; setData(next); setStorageError(false); setSyncState('ready'); },
+      // Já carregou antes: os dados na tela valem, só avisa. Senão, tela de erro.
+      () => { if (loadedOnce.current) setStorageError(true); else setSyncState('failed'); },
     );
-  }, [dataUid, readOnly, retryCount]);
-
-  useEffect(() => {
-    if (syncState !== 'ready' || !userId || readOnly || lastSynced.current === null) return;
-    const data = { people, cards, cardTransactions, otherExpenses, paletteKey };
-    const key = syncKey(data);
-    if (key === lastSynced.current) return;
-    lastSynced.current = key;
-    saveUserData(userId, data).then(
-      () => setStorageError(false),
-      () => setStorageError(true),
-    );
-  }, [people, cards, cardTransactions, otherExpenses, paletteKey, syncState, userId, readOnly]);
+  }, [spaceId, retryCount]);
 
   function retryLoad() {
     setSyncState('loading');
     setRetryCount(n => n + 1);
+  }
+
+  // Dispara a gravação sem esperar: a tela já mostra o resultado. Se falhar,
+  // avisa (o Firestore desfaz a mudança local sozinho).
+  function write(promise) {
+    promise.then(() => setStorageError(false), () => setStorageError(true));
   }
 
   function personTotal(personId, month) {
@@ -377,135 +284,122 @@ export default function ExtratoApp({ viewing = null, onView = () => {}, partners
     const colors = PALETTES[paletteKey]?.people || PALETTES[DEFAULT_PALETTE].people;
     return colors[idx >= 0 ? idx % colors.length : 0];
   }
+  const nextOrder = list => list.reduce((m, x) => Math.max(m, Number(x.order) || 0), 0) + 1;
 
   function addPerson(name, salary) {
     if (!name.trim()) return;
-    setPeople(p => [...p, { id: uid(), name: name.trim(), salary: Number(salary) || 0 }]);
+    write(store.set('people', newId(), { name, salary, order: nextOrder(people) }));
   }
   function removePerson(id) {
-    setPeople(p => p.filter(x => x.id !== id));
-    setCardTransactions(t => t.filter(x => x.personId !== id));
-    setOtherExpenses(t => t.filter(x => x.personId !== id));
+    write(store.removeMany([
+      ['people', id],
+      ...cardTransactions.filter(x => x.personId === id).map(x => ['cardTransactions', x.id]),
+      ...otherExpenses.filter(x => x.personId === id).map(x => ['otherExpenses', x.id]),
+    ]));
   }
   function updateSalary(id, salary) {
-    setPeople(p => p.map(x => x.id === id ? { ...x, salary: Number(salary) || 0 } : x));
+    const p = people.find(x => x.id === id);
+    if (p) write(store.update('people', p, { salary }));
   }
   function addCard(name, limitValue, bank, dueDay) {
     if (!name.trim()) return;
-    setCards(c => [...c, { id: uid(), name: name.trim(), limitValue: Number(limitValue) || 0, bank: bank || '', dueDay: parseDueDay(dueDay) }]);
+    write(store.set('cards', newId(), { name, limitValue, bank, dueDay: parseDueDay(dueDay), paidInvoices: [], order: nextOrder(cards) }));
   }
   function updateCardDueDay(id, dueDay) {
-    setCards(c => c.map(x => x.id === id ? { ...x, dueDay: parseDueDay(dueDay) } : x));
+    const c = cards.find(x => x.id === id);
+    if (c) write(store.update('cards', c, { dueDay: parseDueDay(dueDay) }));
   }
   function removeCard(id) {
-    setCards(c => c.filter(x => x.id !== id));
-    setCardTransactions(t => t.filter(x => x.cardId !== id));
+    write(store.removeMany([
+      ['cards', id],
+      ...cardTransactions.filter(x => x.cardId === id).map(x => ['cardTransactions', x.id]),
+    ]));
     setExpandedCard(e => (e === id ? null : e));
+  }
+  // Gera os lançamentos de uma compra: uma linha por parcela e por pessoa.
+  function buildEntries(entry, extra) {
+    const total = Math.max(1, Math.floor(Number(entry.installments)) || 1);
+    const paidCount = Math.min(total, Math.max(0, Math.floor(Number(entry.paidInstallments)) || 0));
+    const groupId = newId();
+    // Divide o valor igualmente entre o responsável principal e quem mais
+    // estiver marcado em "dividir com" (ex.: consórcio dividido com a namorada).
+    const participants = [entry.personId, ...((entry.splitWith || []).filter(id => id && id !== entry.personId))];
+    const splitGroupId = participants.length > 1 ? newId() : undefined;
+    const perInstallmentAmount = (Number(entry.amount) || 0) / participants.length / total;
+    // A data informada é a da PRÓXIMA parcela a vencer (nº paidCount+1).
+    // As parcelas já pagas ficam com datas retroativas; as futuras seguem em frente a partir dela.
+    return participants.flatMap(personId =>
+      Array.from({ length: total }, (_, i) => ({
+        ...extra,
+        id: newId(),
+        personId,
+        description: entry.description.trim(),
+        amount: perInstallmentAmount,
+        date: monthsLaterDate(entry.date, i - paidCount),
+        fixed: total === 1 && !!entry.fixed,
+        category: entry.category || DEFAULT_CATEGORY,
+        installmentNumber: i + 1,
+        installmentTotal: total,
+        ...(total > 1 ? { installmentGroupId: groupId } : {}),
+        ...(splitGroupId ? { splitGroupId, splitCount: participants.length } : {}),
+        paid: i < paidCount,
+      }))
+    );
   }
   function addCardTransaction(cardId, tx) {
     if (!tx.description.trim() || !tx.personId) return;
-    const total = Math.max(1, Math.floor(Number(tx.installments)) || 1);
-    const paidCount = Math.min(total, Math.max(0, Math.floor(Number(tx.paidInstallments)) || 0));
-    const groupId = uid();
-    const participants = [tx.personId, ...((tx.splitWith || []).filter(id => id && id !== tx.personId))];
-    const splitGroupId = participants.length > 1 ? uid() : undefined;
-    const perPersonAmount = (Number(tx.amount) || 0) / participants.length;
-    const perInstallmentAmount = perPersonAmount / total;
-    // A data informada é a da PRÓXIMA parcela a vencer (nº paidCount+1).
-    // As parcelas já pagas ficam com datas retroativas; as futuras seguem em frente a partir dela.
-    const newTxs = participants.flatMap(personId =>
-      Array.from({ length: total }, (_, i) => ({
-        id: uid(),
-        cardId,
-        personId,
-        description: tx.description.trim(),
-        amount: perInstallmentAmount,
-        date: monthsLaterDate(tx.date, i - paidCount),
-        fixed: total === 1 && !!tx.fixed,
-        category: tx.category || DEFAULT_CATEGORY,
-        installmentNumber: i + 1,
-        installmentTotal: total,
-        ...(total > 1 ? { installmentGroupId: groupId } : {}),
-        ...(splitGroupId ? { splitGroupId, splitCount: participants.length } : {}),
-        paid: i < paidCount,
-      }))
-    );
-    setCardTransactions(t => [...t, ...newTxs]);
+    write(store.setMany('cardTransactions', buildEntries(tx, { cardId })));
   }
   function removeCardTransaction(id) {
-    setCardTransactions(t => t.filter(x => x.id !== id));
+    write(store.remove('cardTransactions', id));
   }
   function toggleCardTransactionPaid(id) {
-    setCardTransactions(t => t.map(x => x.id === id ? { ...x, paid: !x.paid } : x));
+    const t = cardTransactions.find(x => x.id === id);
+    if (t) write(store.update('cardTransactions', t, { paid: !t.paid }));
   }
-  function updateCardTransaction(id, patch) {
-    setCardTransactions(t => t.map(x => x.id === id ? {
-      ...x,
+  function editPatch(x, patch) {
+    return {
       description: patch.description?.trim() || x.description,
       amount: Number(patch.amount) || 0,
       date: patch.date || x.date,
       personId: patch.personId || x.personId,
       fixed: !(x.installmentTotal > 1) && !!patch.fixed,
       category: patch.category || x.category || DEFAULT_CATEGORY,
-    } : x));
+    };
+  }
+  function updateCardTransaction(id, patch) {
+    const t = cardTransactions.find(x => x.id === id);
+    if (t) write(store.update('cardTransactions', t, editPatch(t, patch)));
   }
   function addOtherExpense(exp) {
     if (!exp.description.trim() || !exp.personId) return;
-    const total = Math.max(1, Math.floor(Number(exp.installments)) || 1);
-    const paidCount = Math.min(total, Math.max(0, Math.floor(Number(exp.paidInstallments)) || 0));
-    const groupId = uid();
-    // Divide o valor igualmente entre o responsável principal e quem mais
-    // estiver marcado em "dividir com" (ex.: consórcio dividido com a namorada).
-    const participants = [exp.personId, ...((exp.splitWith || []).filter(id => id && id !== exp.personId))];
-    const splitGroupId = participants.length > 1 ? uid() : undefined;
-    const perPersonAmount = (Number(exp.amount) || 0) / participants.length;
-    const perInstallmentAmount = perPersonAmount / total;
-    // A data informada é a da PRÓXIMA parcela a vencer (nº paidCount+1).
-    // As parcelas já pagas ficam com datas retroativas; as futuras seguem em frente a partir dela.
-    const newExpenses = participants.flatMap(personId =>
-      Array.from({ length: total }, (_, i) => ({
-        id: uid(),
-        personId,
-        description: exp.description.trim(),
-        amount: perInstallmentAmount,
-        date: monthsLaterDate(exp.date, i - paidCount),
-        fixed: total === 1 && !!exp.fixed,
-        category: exp.category || DEFAULT_CATEGORY,
-        installmentNumber: i + 1,
-        installmentTotal: total,
-        ...(total > 1 ? { installmentGroupId: groupId } : {}),
-        ...(splitGroupId ? { splitGroupId, splitCount: participants.length } : {}),
-        paid: i < paidCount,
-      }))
-    );
-    setOtherExpenses(t => [...t, ...newExpenses]);
+    write(store.setMany('otherExpenses', buildEntries(exp, {})));
   }
   function removeOtherExpense(id) {
-    setOtherExpenses(t => t.filter(x => x.id !== id));
+    write(store.remove('otherExpenses', id));
   }
+  // Gasto fixo: marca o mês em `paidMonths`; os demais têm um `paid` só.
   function toggleOtherExpensePaid(id, month) {
-    setOtherExpenses(t => t.map(x => x.id === id ? togglePaidIn(x, month) : x));
+    const e = otherExpenses.find(x => x.id === id);
+    if (!e) return;
+    if (isRecurring(e)) write(store.toggleMonth('otherExpenses', id, 'paidMonths', month, !isPaidIn(e, month)));
+    else write(store.update('otherExpenses', e, { paid: !e.paid }));
   }
   function toggleInvoicePaid(cardId, month) {
-    setCards(c => c.map(x => {
-      if (x.id !== cardId) return x;
-      const months = x.paidInvoices || [];
-      return { ...x, paidInvoices: months.includes(month) ? months.filter(m => m !== month) : [...months, month] };
-    }));
+    const c = cards.find(x => x.id === cardId);
+    if (c) write(store.toggleMonth('cards', cardId, 'paidInvoices', month, !isInvoicePaid(c, month)));
   }
   function updateOtherExpense(id, patch) {
-    setOtherExpenses(t => t.map(x => x.id === id ? {
-      ...x,
-      description: patch.description?.trim() || x.description,
-      amount: Number(patch.amount) || 0,
-      date: patch.date || x.date,
-      personId: patch.personId || x.personId,
-      fixed: !(x.installmentTotal > 1) && !!patch.fixed,
-      category: patch.category || x.category || DEFAULT_CATEGORY,
-    } : x));
+    const e = otherExpenses.find(x => x.id === id);
+    if (e) write(store.update('otherExpenses', e, editPatch(e, patch)));
   }
   function clearAll() {
-    setPeople([]); setCards([]); setCardTransactions([]); setOtherExpenses([]);
+    write(store.removeMany([
+      ...people.map(x => ['people', x.id]),
+      ...cards.map(x => ['cards', x.id]),
+      ...cardTransactions.map(x => ['cardTransactions', x.id]),
+      ...otherExpenses.map(x => ['otherExpenses', x.id]),
+    ]));
     setConfirmClear(false);
   }
 
@@ -524,17 +418,15 @@ export default function ExtratoApp({ viewing = null, onView = () => {}, partners
         {syncState === 'loading' ? 'Carregando extrato…' : (
           <div style={{ maxWidth: 380, background: pal.panel, border: `1px solid ${pal.border}`, borderRadius: 16, padding: '2rem', textAlign: 'center' }}>
             <div style={{ color: pal.text, fontWeight: 600, fontSize: '1.05rem', marginBottom: '0.5rem' }}>
-              {readOnly ? 'Não consegui carregar os gastos dessa pessoa' : 'Não consegui carregar seus dados'}
+              Não consegui carregar os dados de “{space?.name}”
             </div>
             <div style={{ fontSize: '0.85rem', marginBottom: '1.25rem' }}>
-              {readOnly
-                ? 'O vínculo pode ter sido desfeito, ou as regras do Firestore ainda não foram publicadas.'
-                : 'Verifique sua conexão e tente de novo. Seus dados continuam salvos na nuvem.'}
+              Verifique sua conexão e tente de novo. Seus dados continuam salvos na nuvem.
             </div>
             <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center', flexWrap: 'wrap' }}>
               <button onClick={retryLoad} style={{ ...btn, background: pal.accent, color: pal.bg, border: 'none' }}>Tentar de novo</button>
-              {readOnly
-                ? <button onClick={() => onView(null)} style={{ ...btn, background: 'transparent', color: pal.textDim }}>Voltar aos meus gastos</button>
+              {spaceId !== spacesApi.homeSpaceId
+                ? <button onClick={() => spacesApi.setActiveSpace(spacesApi.homeSpaceId)} style={{ ...btn, background: 'transparent', color: pal.textDim }}>Ir para Meus gastos</button>
                 : <button onClick={logout} style={{ ...btn, background: 'transparent', color: pal.textDim }}>Sair</button>}
             </div>
           </div>
@@ -619,36 +511,33 @@ export default function ExtratoApp({ viewing = null, onView = () => {}, partners
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.75rem', flexWrap: 'wrap', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.75rem', flexWrap: 'wrap' }}>
             <h1 className="display" style={{ fontSize: '2.1rem', fontWeight: 700, margin: 0, letterSpacing: '-0.01em' }}>Gestor de Gastos</h1>
-            <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>gestão de contas compartilhadas</span>
+            <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>{space?.name}</span>
           </div>
           <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
-            {partners.length > 0 && (
+            {spaces.length > 1 && (
               <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', color: 'var(--text-dim)' }}>
-                <Eye size={15} />
-                <select value={viewing ? viewing.uid : ''} onChange={e => onView(e.target.value || null)}>
-                  <option value="">Meus gastos</option>
-                  {partners.map(p => <option key={p.uid} value={p.uid}>{p.label}</option>)}
+                <Users size={15} />
+                <select value={spaceId} onChange={e => { setOpenPanel(null); spacesApi.setActiveSpace(e.target.value); }} aria-label="Espaço">
+                  {spaces.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
               </label>
             )}
-            <button className="ghost" onClick={() => togglePanel('partners')}>
-              <Link2 size={14} style={{ marginRight: 4, verticalAlign: -2 }} />Parceiros
+            <button className="ghost" onClick={() => togglePanel('space')}>
+              <Link2 size={14} style={{ marginRight: 4, verticalAlign: -2 }} />{spaces.length > 1 ? 'Espaços' : 'Compartilhar'}
             </button>
             <button className="ghost" onClick={() => togglePanel('customize')}>
               <SlidersHorizontal size={14} style={{ marginRight: 4, verticalAlign: -2 }} />Personalizar
             </button>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', color: 'var(--text-dim)' }}>
+              <Palette size={15} />
+              <select value={paletteKey} onChange={e => write(spacesApi.setPaletteKey(e.target.value))} aria-label="Paleta de cores">
+                {Object.entries(PALETTES).map(([key, pal]) => <option key={key} value={key}>{pal.label}</option>)}
+              </select>
+            </label>
             {!readOnly && (
-              <>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', color: 'var(--text-dim)' }}>
-                  <Palette size={15} />
-                  <select value={paletteKey} onChange={e => setPaletteKey(e.target.value)}>
-                    {Object.entries(PALETTES).map(([key, pal]) => <option key={key} value={key}>{pal.label}</option>)}
-                  </select>
-                </label>
-                <button className="ghost" onClick={() => (confirmClear ? clearAll() : setConfirmClear(true))}>
-                  {confirmClear ? 'Confirmar limpeza' : 'Limpar tudo'}
-                </button>
-              </>
+              <button className="ghost" onClick={() => (confirmClear ? clearAll() : setConfirmClear(true))}>
+                {confirmClear ? 'Confirmar limpeza' : 'Limpar tudo'}
+              </button>
             )}
             <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>{user?.email}</span>
             <button className="ghost" onClick={logout} title="Sair">
@@ -679,12 +568,8 @@ export default function ExtratoApp({ viewing = null, onView = () => {}, partners
           />
         )}
 
-        {openPanel === 'partners' && partnersApi && (
-          <PartnersPanel
-            partnersApi={partnersApi}
-            onView={(uid) => { setOpenPanel(null); onView(uid); }}
-            onClose={() => setOpenPanel(null)}
-          />
+        {openPanel === 'space' && (
+          <SpacePanel spacesApi={spacesApi} userId={user?.uid} onClose={() => setOpenPanel(null)} />
         )}
 
         {openPanel === 'customize' && (
@@ -698,17 +583,14 @@ export default function ExtratoApp({ viewing = null, onView = () => {}, partners
           }}>
             <Eye size={16} color="var(--accent-light)" />
             <span style={{ fontSize: '0.85rem', flex: '1 1 200px' }}>
-              Você está vendo os gastos de <strong>{viewing.label}</strong> — somente leitura.
+              Você pode só <strong>visualizar</strong> o espaço “{space?.name}”. Para lançar gastos, peça ao dono para mudar seu acesso.
             </span>
-            <button className="ghost" onClick={() => onView(null)}>Voltar aos meus gastos</button>
           </div>
         )}
 
         {storageError && (
           <p style={{ color: 'var(--danger)', fontSize: '0.8rem', marginTop: '0.5rem' }}>
-            {readOnly
-              ? 'Parei de receber as atualizações dessa pessoa. O vínculo pode ter sido desfeito.'
-              : 'Não consegui sincronizar seus dados com o servidor agora. Recarregue a página para ver mudanças feitas em outros aparelhos.'}
+            Não consegui salvar ou sincronizar agora. Verifique sua conexão; se o erro continuar, recarregue a página.
           </p>
         )}
       </header>
