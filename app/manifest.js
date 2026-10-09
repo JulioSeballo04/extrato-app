@@ -2,11 +2,13 @@
 // cheia, sem a barra do navegador. Servido pelo Next em /manifest.webmanifest.
 // Sem service worker de propósito: os dados já ficam no Firestore e um cache
 // offline do app faria o celular mostrar versões antigas depois de um deploy.
+import { BRAND } from '../lib/brand';
+
 export default function manifest() {
   return {
-    name: 'Gestor de Gastos',
-    short_name: 'Gastos',
-    description: 'Controle de gastos e cartões compartilhados entre pessoas',
+    name: BRAND.name,
+    short_name: BRAND.shortName,
+    description: BRAND.description,
     lang: 'pt-BR',
     start_url: '/',
     scope: '/',

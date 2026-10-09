@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { useAuth } from '../../context/AuthContext';
+import { BRAND } from '../../lib/brand';
 
 function traduzErro(code) {
   const mapa = {
@@ -16,21 +18,27 @@ function traduzErro(code) {
     'auth/missing-password': 'Digite uma senha.',
     'auth/popup-closed-by-user': 'Janela do Google fechada antes de concluir o login.',
     'auth/account-exists-with-different-credential': 'Já existe uma conta com esse e-mail usando outro método de login.',
+    'auth/missing-email': 'Digite seu e-mail.',
   };
   return mapa[code] || 'Não foi possível entrar. Tente novamente.';
 }
 
 export default function LoginPage() {
-  const { user, loading, login, loginWithGoogle, register } = useAuth();
+  const { user, loading, login, loginWithGoogle, register, resetPassword } = useAuth();
   const router = useRouter();
 
-  const [mode, setMode] = useState('login'); // 'login' | 'cadastro'
+  const [mode, setMode] = useState('login'); // 'login' | 'cadastro' | 'senha'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [googleSubmitting, setGoogleSubmitting] = useState(false);
+  const [notice, setNotice] = useState('');
+
+  function switchMode(next) {
+    setMode(next); setError(''); setNotice('');
+  }
 
   useEffect(() => {
     if (!loading && user) router.replace('/');
@@ -39,6 +47,25 @@ export default function LoginPage() {
   async function handleSubmit(e) {
     e.preventDefault();
     setError('');
+    setNotice('');
+
+    if (mode === 'senha') {
+      setSubmitting(true);
+      try {
+        await resetPassword(email.trim());
+        // Mesma mensagem com ou sem conta: não revela quais e-mails estão cadastrados.
+        setNotice('Se existir uma conta com esse e-mail, enviamos um link para criar uma nova senha. Confira também o spam.');
+      } catch (err) {
+        if (err.code === 'auth/user-not-found') {
+          setNotice('Se existir uma conta com esse e-mail, enviamos um link para criar uma nova senha. Confira também o spam.');
+        } else {
+          setError(traduzErro(err.code));
+        }
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
 
     if (mode === 'cadastro' && password !== confirmPassword) {
       setError('As senhas não coincidem.');
@@ -119,6 +146,7 @@ export default function LoginPage() {
         }
         .login-card button.google:hover { border-color: #6B7280; }
         .login-card button.google:disabled { opacity: 0.6; cursor: default; }
+        .login-card a { color: #C9A227; }
         .login-card .divider {
           display: flex; align-items: center; gap: 0.75rem; color: #6B7280; font-size: 0.78rem; margin: 1.1rem 0;
         }
@@ -139,10 +167,10 @@ export default function LoginPage() {
         }}
       >
         <div className="display" style={{ fontSize: '1.5rem', marginBottom: '0.25rem' }}>
-          Gestor de Gastos
+          {BRAND.name}
         </div>
         <div style={{ color: '#6B7280', fontSize: '0.85rem', marginBottom: '1.75rem' }}>
-          {mode === 'login' ? 'Entre para ver suas contas' : 'Crie sua conta para começar'}
+          {mode === 'login' ? 'Entre para ver suas contas' : mode === 'cadastro' ? 'Crie sua conta para começar' : 'Vamos enviar um link para você criar uma nova senha'}
         </div>
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
@@ -158,6 +186,7 @@ export default function LoginPage() {
             />
           </label>
 
+          {mode !== 'senha' && (
           <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.8rem', color: '#9096A3' }}>
             Senha
             <input
@@ -170,6 +199,13 @@ export default function LoginPage() {
               placeholder="••••••••"
             />
           </label>
+          )}
+
+          {mode === 'login' && (
+            <button type="button" className="link" style={{ alignSelf: 'flex-end', marginTop: '-0.4rem', fontSize: '0.8rem' }} onClick={() => switchMode('senha')}>
+              Esqueci minha senha
+            </button>
+          )}
 
           {mode === 'cadastro' && (
             <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.8rem', color: '#9096A3' }}>
@@ -189,12 +225,16 @@ export default function LoginPage() {
           {error && (
             <div style={{ color: '#C1543C', fontSize: '0.82rem' }}>{error}</div>
           )}
+          {notice && (
+            <div role="status" style={{ color: '#4F9D6E', fontSize: '0.82rem' }}>{notice}</div>
+          )}
 
           <button className="primary" type="submit" disabled={submitting} style={{ marginTop: '0.4rem' }}>
-            {submitting ? 'Aguarde…' : mode === 'login' ? 'Entrar' : 'Criar conta'}
+            {submitting ? 'Aguarde…' : mode === 'login' ? 'Entrar' : mode === 'cadastro' ? 'Criar conta' : 'Enviar link'}
           </button>
         </form>
 
+        {mode !== 'senha' && <>
         <div className="divider">ou</div>
 
         <button className="google" type="button" onClick={handleGoogle} disabled={googleSubmitting}>
@@ -206,24 +246,34 @@ export default function LoginPage() {
           </svg>
           {googleSubmitting ? 'Aguarde…' : 'Entrar com Google'}
         </button>
+        </>}
 
         <div style={{ marginTop: '1.5rem', fontSize: '0.85rem', color: '#6B7280', textAlign: 'center' }}>
           {mode === 'login' ? (
             <>
               Ainda não tem conta?{' '}
-              <button className="link" onClick={() => { setMode('cadastro'); setError(''); }}>
+              <button className="link" onClick={() => switchMode('cadastro')}>
                 Criar conta
               </button>
             </>
-          ) : (
+          ) : mode === 'cadastro' ? (
             <>
               Já tem conta?{' '}
-              <button className="link" onClick={() => { setMode('login'); setError(''); }}>
+              <button className="link" onClick={() => switchMode('login')}>
                 Entrar
               </button>
             </>
+          ) : (
+            <button className="link" onClick={() => switchMode('login')}>
+              Voltar para o login
+            </button>
           )}
         </div>
+
+        <p style={{ marginTop: '1.25rem', marginBottom: 0, fontSize: '0.72rem', color: '#6B7280', textAlign: 'center', lineHeight: 1.5 }}>
+          Ao continuar, você concorda com os <Link href="/termos">Termos de uso</Link> e
+          a <Link href="/privacidade">Política de privacidade</Link>.
+        </p>
       </div>
     </div>
   );

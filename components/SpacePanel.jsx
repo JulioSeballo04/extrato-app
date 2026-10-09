@@ -29,7 +29,7 @@ export default function SpacePanel({ spacesApi, userId, onClose }) {
   const [codeInput, setCodeInput] = useState('');
   const [newName, setNewName] = useState('');
   const [rename, setRename] = useState(null);
-  const [confirm, setConfirm] = useState(null); // 'leave' | 'delete' | `remove:<uid>`
+  const [confirm, setConfirm] = useState(null); // 'leave' | 'delete' | `remove:<uid>` | `transfer:<uid>`
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState(null); // { type: 'ok' | 'error', text }
 
@@ -118,6 +118,13 @@ export default function SpacePanel({ spacesApi, userId, onClose }) {
               </select>
             ) : (
               <span style={{ color: 'var(--text-dim)', fontSize: '0.8rem' }}>{ROLES[m.role] || m.role}</span>
+            )}
+            {isOwner && m.role !== 'owner' && !isHome && (
+              confirm === `transfer:${m.uid}` ? (
+                <button className="ghost" style={{ borderColor: 'var(--accent)', color: 'var(--accent-light)' }} onClick={() => run(() => spacesApi.transferOwnership(space.id, m.uid), `${m.label} agora é dono(a) de “${space.name}”. Você continua podendo editar.`)}>Confirmar: tornar dono(a)</button>
+              ) : (
+                <button className="ghost" onClick={() => setConfirm(`transfer:${m.uid}`)}>Tornar dono(a)</button>
+              )
             )}
             {isOwner && m.role !== 'owner' && (
               confirm === `remove:${m.uid}` ? (

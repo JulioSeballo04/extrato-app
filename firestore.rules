@@ -66,10 +66,11 @@ service cloud.firestore {
         && request.resource.data.members == [request.auth.uid]
         && (!spaceId.matches('^home_.*') || spaceId == 'home_' + request.auth.uid);
 
-      // Dono: renomeia, muda papéis e remove membros (nunca adiciona alguém).
+      // Dono: renomeia, muda papéis, remove membros (nunca adiciona alguém) e
+      // pode passar o espaço para outro membro (ex.: ao excluir a própria conta).
       allow update: if signedIn()
         && resource.data.ownerId == request.auth.uid
-        && request.resource.data.ownerId == resource.data.ownerId
+        && (request.resource.data.ownerId == resource.data.ownerId || request.resource.data.ownerId in resource.data.members)
         && validSpace(request.resource.data)
         && request.resource.data.members.toSet().difference(resource.data.members.toSet()).size() == 0;
 
@@ -100,7 +101,8 @@ service cloud.firestore {
         && !(request.auth.uid in request.resource.data.roles)
         && request.resource.data.labels.diff(resource.data.labels).affectedKeys().hasOnly([request.auth.uid]);
 
-      allow delete: if signedIn() && resource.data.ownerId == request.auth.uid && !spaceId.matches('^home_.*');
+      // O app só apaga o espaço pessoal ao excluir a conta.
+      allow delete: if signedIn() && resource.data.ownerId == request.auth.uid;
 
       // ---- Itens do espaço: membros leem; dono e editores gravam.
       function validPerson(d) {
@@ -111,10 +113,11 @@ service cloud.firestore {
       }
 
       function validCard(d) {
-        return d.keys().hasOnly(['name', 'limitValue', 'bank', 'dueDay', 'paidInvoices', 'order'])
+        return d.keys().hasOnly(['name', 'limitValue', 'color', 'bank', 'dueDay', 'paidInvoices', 'order'])
           && d.name is string && d.name.size() >= 1 && d.name.size() <= 60
           && d.limitValue is number && d.limitValue >= 0
-          && d.bank is string && d.bank.size() <= 30
+          && (!('color' in d) || (d.color is string && d.color.size() <= 20))
+          && (!('bank' in d) || (d.bank is string && d.bank.size() <= 30))
           && d.dueDay is int && d.dueDay >= 0 && d.dueDay <= 31
           && isMonthList(d.paidInvoices)
           && (!('order' in d) || d.order is number);
@@ -172,6 +175,8 @@ service cloud.firestore {
     // quando alguém entra (ver a regra de entrada acima). Busca só pelo código.
     match /spaceInvites/{code} {
       allow get: if signedIn();
+      // Listar só os próprios convites (para apagá-los ao excluir a conta).
+      allow list: if signedIn() && resource.data.createdBy == request.auth.uid;
       allow create: if signedIn()
         && code.size() >= 10
         && request.resource.data.keys().hasOnly(['spaceId', 'spaceName', 'role', 'createdBy', 'expiresAt', 'createdAt'])

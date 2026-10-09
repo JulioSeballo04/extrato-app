@@ -1,12 +1,13 @@
 import { AuthProvider } from '../context/AuthContext';
 import './globals.css';
+import { BRAND } from '../lib/brand';
 
 export const metadata = {
-  title: 'Gestor de Gastos — contas e cartões compartilhados',
-  description: 'Controle de gastos e cartões compartilhados entre pessoas',
-  applicationName: 'Gestor de Gastos',
+  title: `${BRAND.name} — ${BRAND.tagline.toLowerCase()}`,
+  description: BRAND.description,
+  applicationName: BRAND.name,
   // iPhone: abre em tela cheia quando instalado pela opção "Adicionar à Tela de Início".
-  appleWebApp: { capable: true, title: 'Gastos', statusBarStyle: 'black' },
+  appleWebApp: { capable: true, title: BRAND.shortName, statusBarStyle: 'black' },
   icons: { apple: '/icons/apple-touch-icon.png' },
 };
 

@@ -11,6 +11,11 @@ import {
   sendEmailVerification,
   signOut,
   reload,
+  sendPasswordResetEmail,
+  EmailAuthProvider,
+  reauthenticateWithCredential,
+  reauthenticateWithPopup,
+  deleteUser,
 } from 'firebase/auth';
 import { auth } from '../lib/firebase';
 
@@ -70,9 +75,39 @@ export function AuthProvider({ children }) {
     return signOut(auth);
   }
 
+  // Envia o link de redefinição. Não revela se o e-mail tem conta ou não.
+  function resetPassword(email) {
+    return sendPasswordResetEmail(auth, email);
+  }
+
+  // Conta com senha ou com Google (define como confirmar a identidade).
+  function signInMethod() {
+    const ids = (auth.currentUser?.providerData || []).map(p => p.providerId);
+    return ids.includes('password') ? 'password' : 'google';
+  }
+
+  // Ações sensíveis (excluir a conta) exigem login recente: pede a senha de
+  // novo, ou reabre o Google, antes de apagar qualquer coisa.
+  async function reauthenticate(password) {
+    const current = auth.currentUser;
+    if (signInMethod() === 'password') {
+      await reauthenticateWithCredential(current, EmailAuthProvider.credential(current.email, password));
+    } else {
+      await reauthenticateWithPopup(current, new GoogleAuthProvider());
+    }
+  }
+
+  // Remove o usuário do Firebase Auth (os dados já devem ter sido apagados).
+  function deleteAccount() {
+    return deleteUser(auth.currentUser);
+  }
+
   return (
     <AuthContext.Provider
-      value={{ user, loading, login, loginWithGoogle, register, logout, resendVerificationEmail, refreshUser }}
+      value={{
+        user, loading, login, loginWithGoogle, register, logout, resendVerificationEmail, refreshUser,
+        resetPassword, signInMethod, reauthenticate, deleteAccount,
+      }}
     >
       {children}
     </AuthContext.Provider>

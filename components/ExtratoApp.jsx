@@ -1,10 +1,12 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Trash2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Users, Pencil, Check, X, Palette, LogOut, Link2, Eye, SlidersHorizontal, ListChecks } from 'lucide-react';
+import { Plus, Trash2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Users, Pencil, Check, X, Palette, LogOut, Link2, Eye, SlidersHorizontal, ListChecks, UserRound } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { spaceStore, subscribeSpaceData, newId } from '../lib/spaces';
 import SpacePanel from './SpacePanel';
+import AccountPanel from './AccountPanel';
+import { BRAND } from '../lib/brand';
 import CustomizePanel, { DEFAULT_VISIBLE } from './CustomizePanel';
 
 const VISIBLE_SECTIONS_KEY = 'gestor-de-gastos:secoes-visiveis';
@@ -64,16 +66,27 @@ const PALETTES = {
 };
 const DEFAULT_PALETTE = 'gold';
 
-// Paletas inspiradas na identidade visual de cada instituição (cores de marca,
-// sem reproduzir logotipos ou marcas registradas). O "mono" é um monograma
-// simples criado a partir do nome do banco, não o logotipo oficial.
-const BANKS = {
-  nubank: { label: 'Nubank', gradient: ['#8A05BE', '#5C0184'], chip: '#F2D9FF', mono: 'Nu' },
-  santander: { label: 'Santander', gradient: ['#EC0000', '#8C0000'], chip: '#FFD6D6', mono: 'S' },
-  itau: { label: 'Itaú', gradient: ['#003DA5', '#EC7000'], chip: '#FFDCB0', mono: 'I' },
-  mercadopago: { label: 'Mercado Pago', gradient: ['#00AAFF', '#0038B8'], chip: '#FFF06B', mono: 'MP' },
-  portoseguro: { label: 'Porto Seguro', gradient: ['#003057', '#0058A3'], chip: '#BFDCFF', mono: 'PS' },
+// Cores livres para o cartão (sem nomes, logos ou cores de marca de bancos).
+// O usuário escolhe a cor e digita o nome que quiser no cartão.
+const CARD_COLORS = {
+  roxo: { label: 'Roxo', gradient: ['#7B2FBE', '#46157A'] },
+  vermelho: { label: 'Vermelho', gradient: ['#D23B3B', '#7A1414'] },
+  laranja: { label: 'Laranja', gradient: ['#E8710A', '#8A3D00'] },
+  dourado: { label: 'Dourado', gradient: ['#C9A227', '#6E5410'] },
+  verde: { label: 'Verde', gradient: ['#2E9D5B', '#14532D'] },
+  ciano: { label: 'Ciano', gradient: ['#0EA5C6', '#0B5670'] },
+  azul: { label: 'Azul', gradient: ['#2F6FD9', '#0F3A8A'] },
+  marinho: { label: 'Marinho', gradient: ['#1D4A75', '#0B2240'] },
+  rosa: { label: 'Rosa', gradient: ['#D94A86', '#7D1D4A'] },
+  grafite: { label: 'Grafite', gradient: ['#4A505C', '#1E2128'] },
 };
+// Cartões criados antes guardavam o banco (`bank`); viram a cor mais próxima.
+const LEGACY_BANK_COLORS = { nubank: 'roxo', santander: 'vermelho', itau: 'laranja', mercadopago: 'ciano', portoseguro: 'marinho' };
+// "auto" = cor automática escolhida pela paleta do app.
+function cardColorKey(card) {
+  if (card.color === 'auto') return '';
+  return CARD_COLORS[card.color] ? card.color : LEGACY_BANK_COLORS[card.bank] || '';
+}
 
 function money(v) {
   return (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -180,7 +193,7 @@ export default function ExtratoApp({ spacesApi }) {
   const spaceId = space?.id;
   const readOnly = role === 'viewer';
 
-  const [openPanel, setOpenPanel] = useState(null); // 'space' | 'customize' | 'bills' | null
+  const [openPanel, setOpenPanel] = useState(null); // 'space' | 'account' | 'customize' | 'bills' | null
   const [visible, setVisible] = useState(DEFAULT_VISIBLE);
   // 'loading' até chegarem os dados do espaço; 'failed' se a leitura falhar.
   const [syncState, setSyncState] = useState('loading');
@@ -301,9 +314,13 @@ export default function ExtratoApp({ spacesApi }) {
     const p = people.find(x => x.id === id);
     if (p) write(store.update('people', p, { salary }));
   }
-  function addCard(name, limitValue, bank, dueDay) {
+  function addCard(name, limitValue, color, dueDay) {
     if (!name.trim()) return;
-    write(store.set('cards', newId(), { name, limitValue, bank, dueDay: parseDueDay(dueDay), paidInvoices: [], order: nextOrder(cards) }));
+    write(store.set('cards', newId(), { name, limitValue, color, dueDay: parseDueDay(dueDay), paidInvoices: [], order: nextOrder(cards) }));
+  }
+  function updateCardColor(id, color) {
+    const c = cards.find(x => x.id === id);
+    if (c) write(store.update('cards', c, { color }));
   }
   function updateCardDueDay(id, dueDay) {
     const c = cards.find(x => x.id === id);
@@ -488,11 +505,6 @@ export default function ExtratoApp({ spacesApi }) {
         .extrato-app .credit-card { border-radius: 18px; padding: 1.1rem 1.3rem; position: relative; overflow: hidden; cursor: pointer;
           transition: transform 0.2s ease; }
         .extrato-app .credit-card:hover { transform: translateY(-3px); }
-        .extrato-app .bank-mono {
-          width: 34px; height: 34px; border-radius: 9px; display: flex; align-items: center; justify-content: center;
-          font-family: 'Fraunces', serif; font-weight: 700; font-size: 0.85rem; color: #fff;
-          background: rgba(255,255,255,0.16); border: 1px solid rgba(255,255,255,0.35); letter-spacing: -0.02em;
-        }
         @media (prefers-reduced-motion: reduce) {
           .extrato-app .credit-card, .extrato-app button.primary { transition: none; }
           .extrato-app .credit-card:hover { transform: none; }
@@ -510,7 +522,7 @@ export default function ExtratoApp({ spacesApi }) {
       <header style={{ padding: '2.5rem 1.5rem 1.5rem', maxWidth: 1180, margin: '0 auto' }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.75rem', flexWrap: 'wrap', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.75rem', flexWrap: 'wrap' }}>
-            <h1 className="display" style={{ fontSize: '2.1rem', fontWeight: 700, margin: 0, letterSpacing: '-0.01em' }}>Gestor de Gastos</h1>
+            <h1 className="display" style={{ fontSize: '2.1rem', fontWeight: 700, margin: 0, letterSpacing: '-0.01em' }}>{BRAND.name}</h1>
             <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>{space?.name}</span>
           </div>
           <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
@@ -539,7 +551,9 @@ export default function ExtratoApp({ spacesApi }) {
                 {confirmClear ? 'Confirmar limpeza' : 'Limpar tudo'}
               </button>
             )}
-            <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>{user?.email}</span>
+            <button className="ghost" onClick={() => togglePanel('account')} title={user?.email}>
+              <UserRound size={14} style={{ marginRight: 4, verticalAlign: -2 }} />Conta
+            </button>
             <button className="ghost" onClick={logout} title="Sair">
               <LogOut size={14} style={{ marginRight: 4, verticalAlign: -2 }} />Sair
             </button>
@@ -570,6 +584,10 @@ export default function ExtratoApp({ spacesApi }) {
 
         {openPanel === 'space' && (
           <SpacePanel spacesApi={spacesApi} userId={user?.uid} onClose={() => setOpenPanel(null)} />
+        )}
+
+        {openPanel === 'account' && (
+          <AccountPanel spacesApi={spacesApi} data={data} spaceName={space?.name} onClose={() => setOpenPanel(null)} />
         )}
 
         {openPanel === 'customize' && (
@@ -616,7 +634,7 @@ export default function ExtratoApp({ spacesApi }) {
           <CardsSection
             cards={cards} people={people} cardTransactions={cardTransactions}
             filterPerson={filterPerson} selectedMonth={selectedMonth} expandedCard={expandedCard} setExpandedCard={setExpandedCard}
-            onAddCard={addCard} onRemoveCard={removeCard} onUpdateDueDay={updateCardDueDay}
+            onAddCard={addCard} onRemoveCard={removeCard} onUpdateDueDay={updateCardDueDay} onUpdateColor={updateCardColor}
             onAddTx={addCardTransaction} onRemoveTx={removeCardTransaction} onTogglePaid={toggleCardTransactionPaid} onUpdateTx={updateCardTransaction}
             cardTotal={cardTotal} personName={personName} personColor={personColor} cardGradients={pal.cardGradients} readOnly={readOnly}
           />
@@ -728,17 +746,17 @@ function PeopleSection({ people, onAdd, onRemove, onSalary, personColor, readOnl
   );
 }
 
-function CardsSection({ cards, people, cardTransactions, filterPerson, selectedMonth, expandedCard, setExpandedCard, onAddCard, onRemoveCard, onUpdateDueDay, onAddTx, onRemoveTx, onTogglePaid, onUpdateTx, cardTotal, personName, personColor, cardGradients, readOnly }) {
+function CardsSection({ cards, people, cardTransactions, filterPerson, selectedMonth, expandedCard, setExpandedCard, onAddCard, onRemoveCard, onUpdateDueDay, onUpdateColor, onAddTx, onRemoveTx, onTogglePaid, onUpdateTx, cardTotal, personName, personColor, cardGradients, readOnly }) {
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState('');
   const [limitValue, setLimitValue] = useState('');
-  const [bank, setBank] = useState('');
+  const [color, setColor] = useState('');
   const [dueDay, setDueDay] = useState('');
   const [confirmCardId, setConfirmCardId] = useState(null);
 
   function submit() {
-    onAddCard(name, limitValue, bank, dueDay);
-    setName(''); setLimitValue(''); setBank(''); setDueDay(''); setShowForm(false);
+    onAddCard(name, limitValue, color, dueDay);
+    setName(''); setLimitValue(''); setColor(''); setDueDay(''); setShowForm(false);
   }
 
   const activeCard = cards.find(c => c.id === expandedCard);
@@ -765,10 +783,10 @@ function CardsSection({ cards, people, cardTransactions, filterPerson, selectedM
 
       {showForm && !readOnly && (
         <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
-          <input placeholder="Nome do cartão" value={name} onChange={e => setName(e.target.value)} style={{ flex: '1 1 160px' }} />
-          <select value={bank} onChange={e => setBank(e.target.value)} style={{ width: 150 }}>
-            <option value="">Sem bandeira</option>
-            {Object.entries(BANKS).map(([key, b]) => <option key={key} value={key}>{b.label}</option>)}
+          <input placeholder="Nome do cartão (ex.: Roxinho)" value={name} onChange={e => setName(e.target.value)} style={{ flex: '1 1 160px' }} />
+          <select value={color} onChange={e => setColor(e.target.value)} style={{ width: 150 }} aria-label="Cor do cartão">
+            <option value="">Cor automática</option>
+            {Object.entries(CARD_COLORS).map(([key, c]) => <option key={key} value={key}>{c.label}</option>)}
           </select>
           <input placeholder="Limite" type="number" value={limitValue} onChange={e => setLimitValue(e.target.value)} style={{ width: 110 }} />
           <input placeholder="Vence dia" type="number" min="1" max="31" value={dueDay} onChange={e => setDueDay(e.target.value)} style={{ width: 100 }} title="Dia do vencimento da fatura" />
@@ -781,9 +799,8 @@ function CardsSection({ cards, people, cardTransactions, filterPerson, selectedM
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: '1rem' }}>
           {cards.map((c, i) => {
-            const bankInfo = c.bank && BANKS[c.bank];
-            const [ca, cb] = bankInfo ? bankInfo.gradient : cardGradients[i % cardGradients.length];
-            const chipColor = bankInfo ? bankInfo.chip : null;
+            const colorInfo = CARD_COLORS[cardColorKey(c)];
+            const [ca, cb] = colorInfo ? colorInfo.gradient : cardGradients[i % cardGradients.length];
             const used = cardTotal(c.id, selectedMonth);
             const pct = c.limitValue > 0 ? Math.min(100, (used / c.limitValue) * 100) : 0;
             const due = dueLabel(c.dueDay);
@@ -792,16 +809,8 @@ function CardsSection({ cards, people, cardTransactions, filterPerson, selectedM
                 style={{ background: `linear-gradient(135deg, ${ca}, ${cb})` }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <div style={{ width: 30, height: 22, borderRadius: 5, background: chipColor ? `linear-gradient(135deg, ${chipColor}, #ffffffaa)` : 'linear-gradient(135deg,var(--accent-light),var(--accent))' }} />
-                    {bankInfo && (
-                      <span className="bank-mono" title={bankInfo.label}>{bankInfo.mono}</span>
-                    )}
+                    <div style={{ width: 30, height: 22, borderRadius: 5, background: colorInfo ? 'linear-gradient(135deg, #ffffffcc, #ffffff55)' : 'linear-gradient(135deg,var(--accent-light),var(--accent))' }} />
                   </div>
-                  {bankInfo && (
-                    <span style={{ fontSize: '0.65rem', fontWeight: 600, color: 'rgba(255,255,255,0.75)', textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: 4 }}>
-                      {bankInfo.label}
-                    </span>
-                  )}
                   {!readOnly && (
                     <button className="icon" style={{ color: 'rgba(255,255,255,0.6)' }} aria-label={`Remover cartão ${c.name}`} onClick={e => { e.stopPropagation(); setConfirmCardId(c.id); }}>
                       <Trash2 size={14} />
@@ -816,7 +825,7 @@ function CardsSection({ cards, people, cardTransactions, filterPerson, selectedM
                   {expandedCard === c.id ? <ChevronUp size={16} color="rgba(255,255,255,0.7)" /> : <ChevronDown size={16} color="rgba(255,255,255,0.7)" />}
                 </div>
                 <div style={{ height: 3, background: 'rgba(255,255,255,0.2)', borderRadius: 2, marginTop: '0.6rem', overflow: 'hidden' }}>
-                  <div style={{ height: '100%', width: `${pct}%`, background: used > c.limitValue ? 'var(--danger)' : (chipColor || 'var(--accent-light)') }} />
+                  <div style={{ height: '100%', width: `${pct}%`, background: used > c.limitValue ? 'var(--danger)' : (colorInfo ? 'rgba(255,255,255,0.85)' : 'var(--accent-light)') }} />
                 </div>
                 {due && (
                   <div style={{ fontSize: '0.7rem', fontWeight: 600, marginTop: '0.55rem', color: due.urgent ? '#FFB4A2' : 'rgba(255,255,255,0.75)' }}>
@@ -865,7 +874,7 @@ function CardsSection({ cards, people, cardTransactions, filterPerson, selectedM
           selectedMonth={selectedMonth}
           monthTransactions={cardTransactions.filter(t => t.cardId === activeCard.id && matchesMonth(t, selectedMonth))}
           transactions={cardTransactions.filter(t => t.cardId === activeCard.id && matchesMonth(t, selectedMonth) && (filterPerson === 'all' || t.personId === filterPerson))}
-          onAddTx={onAddTx} onRemoveTx={onRemoveTx} onTogglePaid={onTogglePaid} onUpdateTx={onUpdateTx} onUpdateDueDay={onUpdateDueDay}
+          onAddTx={onAddTx} onRemoveTx={onRemoveTx} onTogglePaid={onTogglePaid} onUpdateTx={onUpdateTx} onUpdateDueDay={onUpdateDueDay} onUpdateColor={onUpdateColor}
           personName={personName} personColor={personColor} readOnly={readOnly}
         />
       )}
@@ -873,7 +882,7 @@ function CardsSection({ cards, people, cardTransactions, filterPerson, selectedM
   );
 }
 
-function CardLedger({ card, people, transactions, monthTransactions, selectedMonth, onAddTx, onRemoveTx, onTogglePaid, onUpdateTx, onUpdateDueDay, personName, personColor, readOnly }) {
+function CardLedger({ card, people, transactions, monthTransactions, selectedMonth, onAddTx, onRemoveTx, onTogglePaid, onUpdateTx, onUpdateDueDay, onUpdateColor, personName, personColor, readOnly }) {
   const [desc, setDesc] = useState('');
   const [amount, setAmount] = useState('');
   const [personId, setPersonId] = useState(people[0]?.id || '');
@@ -942,6 +951,15 @@ function CardLedger({ card, people, transactions, monthTransactions, selectedMon
             Fatura vence dia
             <input type="number" min="1" max="31" placeholder="—" value={card.dueDay || ''} onChange={e => onUpdateDueDay(card.id, e.target.value)} style={{ width: 64 }} />
             {due && <span style={{ color: due.urgent ? 'var(--danger)' : 'var(--text-muted)' }}>{due.text.split(' · ')[1]}</span>}
+          </label>
+        )}
+        {!readOnly && (
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--text-dim)' }}>
+            Cor
+            <select value={cardColorKey(card)} onChange={e => onUpdateColor(card.id, e.target.value || 'auto')} aria-label="Cor do cartão">
+              <option value="">Automática</option>
+              {Object.entries(CARD_COLORS).map(([key, c]) => <option key={key} value={key}>{c.label}</option>)}
+            </select>
           </label>
         )}
         {spentByPerson.map(({ person, total }) => (
