@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { Pencil, Trash2, Check, X, ChevronDown } from 'lucide-react';
-import { Dot, Tag, Sheet } from '../ui';
+import { Dot, Tag, Sheet, MoneyInput } from '../ui';
 import { CATEGORIES, DEFAULT_CATEGORY, money, parseAmount, amountInput, fmtDate, isRecurring, defaultDateFor } from '../../lib/ledger';
 
 export const OUTSIDE_CARD = 'outside';
@@ -54,8 +54,8 @@ export function EntryForm({ people, cards, selectedMonth, initialTarget, onSubmi
         <div className="grid-2">
           <label className="field">
             Valor total
-            <input inputMode="decimal" placeholder="0,00" value={amount} onChange={e => { setAmount(e.target.value); setErrors(x => ({ ...x, amount: null })); }}
-              aria-invalid={!!errors.amount} className="mono" style={{ fontSize: '1.1rem' }} autoComplete="off" />
+            <MoneyInput value={amount} onChange={v => { setAmount(v); setErrors(x => ({ ...x, amount: null })); }}
+              aria-invalid={!!errors.amount} className="money-lg" />
             {errors.amount && <span style={{ color: 'var(--danger)' }}>{errors.amount}</span>}
           </label>
           <label className="field">
@@ -68,7 +68,8 @@ export function EntryForm({ people, cards, selectedMonth, initialTarget, onSubmi
         <label className="field">
           Onde
           <select value={target} onChange={e => setTarget(e.target.value)}>
-            {cards.map(c => <option key={c.id} value={c.id}>Cartão {c.name}</option>)}
+            {cards.filter(c => c.kind !== 'payee').map(c => <option key={c.id} value={c.id}>Cartão {c.name}</option>)}
+            {cards.filter(c => c.kind === 'payee').map(c => <option key={c.id} value={c.id}>Devo para {c.name}</option>)}
             <option value={OUTSIDE_CARD}>Fora do cartão (Pix, boleto, dinheiro…)</option>
           </select>
         </label>
@@ -227,7 +228,7 @@ function EditRow({ item, people, onSave, onCancel }) {
       <select value={draft.category} onChange={e => set({ category: e.target.value })} aria-label="Categoria">
         {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
       </select>
-      <input inputMode="decimal" value={draft.amount} onChange={e => set({ amount: e.target.value })} aria-label="Valor" className="mono" style={{ width: 100 }} />
+      <MoneyInput value={draft.amount} onChange={v => set({ amount: v })} aria-label="Valor" style={{ width: 130 }} />
       {!isInstallment && (
         <label className="label-sm" style={{ cursor: 'pointer' }}>
           <input type="checkbox" checked={draft.fixed} onChange={e => set({ fixed: e.target.checked })} />

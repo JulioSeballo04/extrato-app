@@ -100,7 +100,8 @@ export function ReportSection({ people, cards, cardTransactions, otherExpenses, 
 
   function cardName(id) {
     const c = cards.find(c => c.id === id);
-    return c ? `Cartão ${c.name}` : 'Cartão';
+    if (!c) return 'Cartão';
+    return c.kind === 'payee' ? `Devo a ${c.name}` : `Cartão ${c.name}`;
   }
 
   function movementsFor(personId) {

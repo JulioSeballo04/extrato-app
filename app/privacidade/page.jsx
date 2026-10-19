@@ -89,7 +89,12 @@ export default function PrivacidadePage() {
       </p>
 
       <h2>9. Crianças e adolescentes</h2>
-      <p>O app é destinado a maiores de 18 anos.</p>
+      <p>
+        O app pode ser usado a partir dos 16 anos. Entre 16 e 18 anos, o uso deve ser feito com o conhecimento do responsável
+        legal, e os dados são tratados no melhor interesse do adolescente (LGPD, art. 14). Não é destinado a menores de 16
+        anos; se soubermos de uma conta assim, ela será excluída. Responsáveis podem pedir acesso ou exclusão pelo e-mail
+        acima.
+      </p>
 
       <h2>10. Mudanças nesta política</h2>
       <p>

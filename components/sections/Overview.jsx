@@ -51,7 +51,7 @@ export function MonthOverview({ spent, cardSum, otherSum, paid, toPay, billsTota
 export function Onboarding({ hasPeople, hasCards, hasEntries, onAddPerson, onAddCard, onAddEntry }) {
   const steps = [
     { done: hasPeople, title: 'Adicione as pessoas', text: 'Quem divide as contas, com o salário (opcional).', action: 'Adicionar pessoa', run: onAddPerson },
-    { done: hasCards, title: 'Cadastre os cartões', text: 'Opcional: separa a fatura de cada cartão.', action: 'Adicionar cartão', run: onAddCard, optional: true },
+    { done: hasCards, title: 'Cadastre cartões ou pessoas a pagar', text: 'Opcional: separa a fatura de cada cartão, ou o que você deve a alguém (ex.: a mãe).', action: 'Adicionar', run: onAddCard, optional: true },
     { done: hasEntries, title: 'Lance o primeiro gasto', text: 'No cartão ou fora dele (Pix, boleto…).', action: 'Novo gasto', run: onAddEntry, disabled: !hasPeople },
   ];
   return (

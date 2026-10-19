@@ -8,7 +8,7 @@ import { BRAND } from '../lib/brand';
 import { PALETTES, AUTO_PALETTE, DEFAULT_PALETTE, resolvePaletteKey, paletteVars, writeCachedPalette, systemPrefersDark } from '../lib/theme';
 import {
   DEFAULT_CATEGORY, monthLabel, capitalize, currentMonth, shiftMonth, monthsLaterDate, matchesMonth, isRecurring, isPaidIn,
-  isInvoicePaid, parseDueDay, sumAmounts, buildMonthBills,
+  isInvoicePaid, parseDueDay, sumAmounts, buildMonthBills, isPayee,
 } from '../lib/ledger';
 import { APP_CSS } from './appStyles';
 import { Toast } from './ui';
@@ -150,9 +150,12 @@ export default function ExtratoApp({ spacesApi }) {
     else document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
+  // "No cartão" conta só cartões; o que se deve a pessoas entra em "outros".
+  const payeeIds = new Set(cards.filter(isPayee).map(c => c.id));
   function personTotal(personId, month) {
-    const cardSum = sumAmounts(cardTransactions.filter(t => t.personId === personId && (!month || matchesMonth(t, month))));
-    const otherSum = sumAmounts(otherExpenses.filter(t => t.personId === personId && (!month || matchesMonth(t, month))));
+    const mine = t => t.personId === personId && (!month || matchesMonth(t, month));
+    const cardSum = sumAmounts(cardTransactions.filter(t => mine(t) && !payeeIds.has(t.cardId)));
+    const otherSum = sumAmounts(otherExpenses.filter(mine)) + sumAmounts(cardTransactions.filter(t => mine(t) && payeeIds.has(t.cardId)));
     return { cardSum, otherSum, total: cardSum + otherSum };
   }
   const availableMonths = Array.from(new Set([
@@ -208,9 +211,10 @@ export default function ExtratoApp({ spacesApi }) {
     const p = people.find(x => x.id === id);
     if (p) write(store.update('people', p, { salary }));
   }
-  function addCard(name, limitValue, color, dueDay) {
+  // kind 'payee' = pessoa a quem se deve (ex.: a mãe); sem kind, é cartão.
+  function addCard(name, limitValue, color, dueDay, kind) {
     if (!name.trim()) return;
-    write(store.set('cards', newId(), { name, limitValue, color, dueDay: parseDueDay(dueDay), paidInvoices: [], order: nextOrder(cards) }));
+    write(store.set('cards', newId(), { name, limitValue, color, dueDay: parseDueDay(dueDay), paidInvoices: [], order: nextOrder(cards), ...(kind === 'payee' ? { kind } : {}) }));
   }
   function updateCardColor(id, color) {
     const c = cards.find(x => x.id === id);

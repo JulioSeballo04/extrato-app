@@ -33,7 +33,10 @@ function entriesCsv({ people, cards, cardTransactions, otherExpenses }) {
   };
   const amount = v => (Number(v) || 0).toFixed(2).replace('.', ',');
   const rows = [
-    ...cardTransactions.map(t => ({ ...t, tipo: 'Cartão', cartao: cardName(t.cardId) })),
+    ...cardTransactions.map(t => ({
+      ...t, cartao: cardName(t.cardId),
+      tipo: cards.find(c => c.id === t.cardId)?.kind === 'payee' ? 'Devo a pessoa' : 'Cartão',
+    })),
     ...otherExpenses.map(t => ({ ...t, tipo: 'Outro gasto', cartao: '' })),
   ].sort((a, b) => (a.date < b.date ? -1 : 1));
   const header = ['Data', 'Tipo', 'Cartão', 'Descrição', 'Categoria', 'Pessoa', 'Valor', 'Parcela', 'Fixo', 'Pago'];

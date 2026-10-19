@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef } from 'react';
 import { X } from 'lucide-react';
+import { amountFromDigits, amountInput, parseAmount } from '../lib/ledger';
 
 // Peças visuais pequenas, usadas em todas as seções.
 
@@ -95,6 +96,27 @@ export function Toast({ toast, onClose }) {
       )}
       <button className="icon" onClick={onClose} aria-label="Fechar aviso"><X size={16} /></button>
     </div>
+  );
+}
+
+// Campo de dinheiro: já mostra "R$ 0,00" e a vírgula é automática (os dígitos
+// entram pelos centavos, como nos apps de banco). `value` é o texto formatado
+// ("1.234,50"); quem usa converte com parseAmount. Colar "12,5" também funciona.
+export function MoneyInput({ value, onChange, style, className = '', ...rest }) {
+  return (
+    <span className="money-input" style={style}>
+      <span className="money-prefix" aria-hidden="true">R$</span>
+      <input
+        {...rest}
+        className={`mono ${className}`}
+        inputMode="numeric"
+        autoComplete="off"
+        placeholder="0,00"
+        value={value}
+        onChange={e => onChange(amountFromDigits(e.target.value))}
+        onPaste={e => { e.preventDefault(); onChange(amountInput(parseAmount(e.clipboardData.getData('text')))); }}
+      />
+    </span>
   );
 }
 

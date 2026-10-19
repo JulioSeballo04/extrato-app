@@ -113,7 +113,9 @@ service cloud.firestore {
       }
 
       function validCard(d) {
-        return d.keys().hasOnly(['name', 'limitValue', 'color', 'bank', 'dueDay', 'paidInvoices', 'order'])
+        // `kind: 'payee'` = pessoa a quem se deve (ex.: a mãe); sem o campo, é um cartão.
+        return d.keys().hasOnly(['name', 'limitValue', 'color', 'bank', 'dueDay', 'paidInvoices', 'order', 'kind'])
+          && (!('kind' in d) || d.kind == 'payee')
           && d.name is string && d.name.size() >= 1 && d.name.size() <= 60
           && d.limitValue is number && d.limitValue >= 0
           && (!('color' in d) || (d.color is string && d.color.size() <= 20))

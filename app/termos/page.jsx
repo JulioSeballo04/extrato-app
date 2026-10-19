@@ -26,7 +26,10 @@ export default function TermosPage() {
 
       <h2>2. Sua conta</h2>
       <ul>
-        <li>Você precisa ter 18 anos ou mais e informar um e-mail válido.</li>
+        <li>
+          Você precisa ter 16 anos ou mais e informar um e-mail válido. Se tiver entre 16 e 18 anos, use o app com o
+          conhecimento do seu responsável legal.
+        </li>
         <li>Você é responsável por manter sua senha em segredo e pelo que for feito com a sua conta.</li>
         <li>Avise-nos em {email} se suspeitar de uso indevido.</li>
       </ul>
@@ -52,7 +55,8 @@ export default function TermosPage() {
         O app pode ter recursos gratuitos e recursos pagos. Preço, forma de pagamento, renovação e o que cada plano inclui
         serão mostrados claramente antes de qualquer cobrança. Assinaturas podem ser canceladas a qualquer momento, valendo
         até o fim do período já pago. Nas contratações online, você pode desistir em até 7 dias da contratação, com
-        reembolso integral (Código de Defesa do Consumidor, art. 49).
+        reembolso integral (Código de Defesa do Consumidor, art. 49). Planos pagos só podem ser contratados por maiores
+        de 18 anos ou pelo responsável legal.
       </p>
 
       <h2>6. Disponibilidade e backup</h2>

@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
-import { Dot } from '../ui';
+import { Dot, MoneyInput } from '../ui';
 import { money, parseAmount, amountInput, entriesNote } from '../../lib/ledger';
 
 export default function PeopleSection({ people, onAdd, onRemove, onSalary, personColor, readOnly, entryCount, formOpen, setFormOpen }) {
@@ -65,7 +65,7 @@ export default function PeopleSection({ people, onAdd, onRemove, onSalary, perso
         <form onSubmit={submit} style={{ display: 'flex', gap: '0.5rem', marginTop: people.length ? '1rem' : 0, flexWrap: 'wrap', alignItems: 'flex-start' }}>
           <input placeholder="Nome" value={name} onChange={e => setName(e.target.value)} aria-label="Nome" aria-invalid={!!error}
             autoFocus={people.length > 0} maxLength={80} style={{ flex: '1 1 140px' }} />
-          <input placeholder="Salário (opcional)" inputMode="decimal" value={salary} onChange={e => setSalary(e.target.value)} aria-label="Salário" style={{ flex: '0 1 170px' }} />
+          <MoneyInput value={salary} onChange={setSalary} aria-label="Salário (opcional)" title="Salário (opcional)" style={{ flex: '0 1 170px' }} />
           <button type="submit" className="primary">Adicionar</button>
           {error && <span style={{ color: 'var(--danger)', fontSize: '0.8rem', flexBasis: '100%' }}>{error}</span>}
         </form>
@@ -85,8 +85,8 @@ function SalaryInput({ value, onCommit, label }) {
   return (
     <label className="label-sm">
       salário
-      <input inputMode="decimal" value={text} placeholder="0,00" onChange={e => setText(e.target.value)} onBlur={commit}
-        onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }} aria-label={label} className="mono" style={{ width: 120 }} />
+      <MoneyInput value={text} onChange={setText} onBlur={commit}
+        onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }} aria-label={label} style={{ width: 140 }} />
     </label>
   );
 }

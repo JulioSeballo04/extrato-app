@@ -81,7 +81,7 @@ export function CalendarSection({ bills, selectedMonth, personName, personColor,
       </div>
 
       <div style={{ display: 'flex', gap: '1rem', fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '1rem', flexWrap: 'wrap' }}>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><Dot size={6} color={CARD_DOT} />fatura do cartão</span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><Dot size={6} color={CARD_DOT} />fatura ou pessoa a pagar</span>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><Dot size={6} color={OTHER_DOT} />outro gasto</span>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><span style={{ width: 10, height: 10, borderRadius: 3, border: '1px solid var(--danger)' }} />conta vencida</span>
       </div>
@@ -118,7 +118,7 @@ function BillLine({ bill, personName, personColor, onToggle, readOnly }) {
       <Dot color={bill.kind === 'card' ? CARD_DOT : OTHER_DOT} />
       <span style={{ flex: '1 1 120px', minWidth: 0 }}>
         {bill.title}
-        {bill.kind === 'card' && <span className="hint" style={{ marginLeft: 6 }}>{bill.tag}</span>}
+        {bill.kind === 'card' && bill.tag && <span className="hint" style={{ marginLeft: 6 }}>{bill.tag}</span>}
       </span>
       {bill.kind === 'expense' && (
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--text-dim)', fontSize: '0.8rem' }}>
@@ -166,7 +166,7 @@ export function BillsPanel({ bills, selectedMonth, onToggle, onClose, personName
             <Dot size={7} color={personColor(b.personId)} />{personName(b.personId)}
           </span>
         ) : (
-          <span style={{ color: 'var(--text-dim)', fontSize: '0.8rem' }}>cartão</span>
+          <span style={{ color: 'var(--text-dim)', fontSize: '0.8rem' }}>{b.payee ? 'pessoa' : 'cartão'}</span>
         )}
         <span className="mono" style={{ fontWeight: 600, color: b.paid ? 'var(--text-muted)' : 'var(--text)' }}>{money(b.amount)}</span>
       </label>

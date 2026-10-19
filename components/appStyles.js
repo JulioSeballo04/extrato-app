@@ -14,6 +14,11 @@ export const APP_CSS = `
     border-radius: 8px; padding: 0.45rem 0.6rem; font-family: inherit; font-size: 0.875rem;
     outline: none; transition: border-color 0.15s; min-height: 36px;
   }
+  .extrato-app .money-input { position: relative; display: inline-flex; align-items: center; min-width: 0; }
+  .extrato-app .money-input input { width: 100%; padding-left: 2.1rem; text-align: right; }
+  .extrato-app .money-input input.money-lg { font-size: 1.1rem; }
+  .extrato-app .money-prefix { position: absolute; left: 0.6rem; color: var(--text-muted); font-size: 0.85em; pointer-events: none; }
+  .extrato-app .field .money-input { width: 100%; }
   .extrato-app input[type="checkbox"] { min-height: 0; width: 16px; height: 16px; padding: 0; accent-color: var(--accent); }
   .extrato-app input:focus, .extrato-app select:focus { border-color: var(--accent); }
   .extrato-app input[aria-invalid="true"] { border-color: var(--danger); }
