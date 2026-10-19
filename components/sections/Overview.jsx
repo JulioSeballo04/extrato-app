@@ -6,7 +6,7 @@ import { money } from '../../lib/ledger';
 
 // Os números do mês, logo no topo: quanto foi gasto, quanto já foi pago,
 // quanto falta pagar e quanto sobra do salário. Respeita o filtro de pessoa.
-export function MonthOverview({ spent, cardSum, otherSum, paid, toPay, overdueCount, pendingCount, salary, onOpenBills }) {
+export function MonthOverview({ spent, cardSum, otherSum, paid, toPay, billsTotal, overdueCount, pendingCount, salary, onOpenBills }) {
   const balance = salary - spent;
   return (
     <section className="overview" aria-label="Resumo do mês">
@@ -27,7 +27,7 @@ export function MonthOverview({ spent, cardSum, otherSum, paid, toPay, overdueCo
       <div className="tile">
         <div className="tile-label">Já pago</div>
         <div className="tile-value" style={{ color: 'var(--success)' }}>{money(paid)}</div>
-        <div className="tile-sub">{spent > 0 ? `${Math.round((paid / spent) * 100)}% do mês` : '—'}</div>
+        <div className="tile-sub">{billsTotal > 0 ? `de ${money(billsTotal)} em contas` : 'nenhuma conta vence no mês'}</div>
       </div>
       <div className="tile">
         <div className="tile-label">{salary > 0 ? (balance >= 0 ? 'Sobra' : 'Falta') : 'Sobra'}</div>

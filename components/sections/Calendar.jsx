@@ -10,7 +10,7 @@ const OTHER_DOT = 'var(--info)';
 
 // Calendário do mês selecionado: vencimento das faturas dos cartões e gastos com
 // data (os "fixos" repetem todo mês, no mesmo dia). Respeita o filtro de pessoa.
-export function CalendarSection({ bills, selectedMonth, personName, personColor }) {
+export function CalendarSection({ bills, selectedMonth, personName, personColor, onToggle, readOnly }) {
   const [selectedDay, setSelectedDay] = useState(null);
 
   const [y, m] = selectedMonth.split('-').map(Number);
@@ -40,7 +40,7 @@ export function CalendarSection({ bills, selectedMonth, personName, personColor 
         )}
       </div>
       <p className="hint" style={{ marginBottom: '1rem' }}>
-        Vencimentos das faturas e gastos com data. Toque num dia para ver só ele.
+        Vencimentos das faturas e gastos com data. Toque num dia para ver só ele; toque na situação para marcar como paga.
       </p>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 4, marginBottom: '0.5rem' }}>
@@ -102,7 +102,7 @@ export function CalendarSection({ bills, selectedMonth, personName, personColor 
                 <div style={{ fontSize: '0.78rem', color: isToday ? 'var(--accent-light)' : 'var(--text-muted)', fontWeight: 600, marginBottom: '0.25rem' }}>
                   Dia {String(day).padStart(2, '0')} · {weekday}{isToday ? ' · hoje' : ''}
                 </div>
-                {events[day].map(ev => <BillLine key={ev.id} bill={ev} personName={personName} personColor={personColor} />)}
+                {events[day].map(ev => <BillLine key={ev.id} bill={ev} personName={personName} personColor={personColor} onToggle={onToggle} readOnly={readOnly} />)}
               </div>
             );
           })}
@@ -112,17 +112,20 @@ export function CalendarSection({ bills, selectedMonth, personName, personColor 
   );
 }
 
-function BillLine({ bill, personName, personColor }) {
+function BillLine({ bill, personName, personColor, onToggle, readOnly }) {
   return (
     <div className="row-line" style={{ fontSize: '0.85rem', padding: '0.35rem 0', borderBottom: '1px solid var(--border)' }}>
       <Dot color={bill.kind === 'card' ? CARD_DOT : OTHER_DOT} />
-      <span style={{ flex: '1 1 120px', minWidth: 0 }}>{bill.title}</span>
+      <span style={{ flex: '1 1 120px', minWidth: 0 }}>
+        {bill.title}
+        {bill.kind === 'card' && <span className="hint" style={{ marginLeft: 6 }}>{bill.tag}</span>}
+      </span>
       {bill.kind === 'expense' && (
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--text-dim)', fontSize: '0.8rem' }}>
           <Dot size={7} color={personColor(bill.personId)} />{personName(bill.personId)}
         </span>
       )}
-      {bill.status && <StatusBadge status={bill.status} readOnly />}
+      {bill.status && <StatusBadge status={bill.status} readOnly={readOnly || !onToggle} onToggle={() => onToggle(bill)} />}
       <span className="mono" style={{ fontWeight: 600 }}>{money(bill.amount)}</span>
     </div>
   );
@@ -155,7 +158,7 @@ export function BillsPanel({ bills, selectedMonth, onToggle, onClose, personName
           textDecoration: b.paid ? 'line-through' : 'none', color: b.paid ? 'var(--text-muted)' : 'var(--text)',
         }}>
           {b.title}
-          {b.tag && <Tag mono>{b.tag}</Tag>}
+          {b.tag && <Tag mono={b.kind === 'expense'}>{b.tag}</Tag>}
           {overdue && <span style={{ fontSize: '0.75rem', color: 'var(--danger)', fontWeight: 600 }}>venceu</span>}
         </span>
         {b.kind === 'expense' ? (

@@ -1,15 +1,15 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Plus, Trash2, ChevronDown, ChevronUp } from 'lucide-react';
+import { Plus, Trash2, ChevronDown, ChevronUp, Check } from 'lucide-react';
 import { Dot, StatusBadge } from '../ui';
 import { EntryList } from './Entries';
 import { CARD_COLORS, cardColorKey } from '../../lib/theme';
-import { money, parseAmount, monthLabel, matchesMonth, isRecurring, dueLabel, entriesNote, sumAmounts } from '../../lib/ledger';
+import { money, parseAmount, monthLabel, matchesMonth, isRecurring, invoiceInfo, entriesNote, sumAmounts } from '../../lib/ledger';
 
 export default function CardsSection({
   cards, people, cardTransactions, filterPerson, selectedMonth, expandedCard, setExpandedCard,
-  onAddCard, onRemoveCard, onUpdateDueDay, onUpdateColor, onNewEntry, onRemoveTx, onTogglePaid, onUpdateTx,
+  onAddCard, onRemoveCard, onUpdateDueDay, onUpdateColor, onToggleInvoice, onNewEntry, onRemoveTx, onTogglePaid, onUpdateTx,
   personName, personColor, cardGradients, readOnly, formOpen, setFormOpen,
 }) {
   const [name, setName] = useState('');
@@ -84,7 +84,7 @@ export default function CardsSection({
             const [ca, cb] = colorInfo ? colorInfo.gradient : cardGradients[i % cardGradients.length];
             const used = sumAmounts(cardTransactions.filter(t => t.cardId === c.id && matchesMonth(t, selectedMonth)));
             const pct = c.limitValue > 0 ? Math.min(100, (used / c.limitValue) * 100) : 0;
-            const due = dueLabel(c.dueDay);
+            const due = invoiceInfo(c, selectedMonth, used);
             const expanded = expandedCard === c.id;
             return (
               <div key={c.id} className="credit-card" role="button" tabIndex={0} aria-expanded={expanded}
@@ -161,7 +161,7 @@ export default function CardsSection({
           monthTransactions={cardTransactions.filter(t => t.cardId === activeCard.id && matchesMonth(t, selectedMonth))}
           filterPerson={filterPerson}
           onNewEntry={onNewEntry} onRemoveTx={onRemoveTx} onTogglePaid={onTogglePaid} onUpdateTx={onUpdateTx}
-          onUpdateDueDay={onUpdateDueDay} onUpdateColor={onUpdateColor}
+          onUpdateDueDay={onUpdateDueDay} onUpdateColor={onUpdateColor} onToggleInvoice={onToggleInvoice}
           personName={personName} personColor={personColor} readOnly={readOnly}
         />
       )}
@@ -169,7 +169,7 @@ export default function CardsSection({
   );
 }
 
-function CardLedger({ card, people, monthTransactions, filterPerson, selectedMonth, onNewEntry, onRemoveTx, onTogglePaid, onUpdateTx, onUpdateDueDay, onUpdateColor, personName, personColor, readOnly }) {
+function CardLedger({ card, people, monthTransactions, filterPerson, selectedMonth, onNewEntry, onRemoveTx, onTogglePaid, onUpdateTx, onUpdateDueDay, onUpdateColor, onToggleInvoice, personName, personColor, readOnly }) {
   const ref = useRef(null);
   // Ao abrir um cartão, traz os lançamentos para a tela (no celular ficam lá embaixo).
   useEffect(() => {
@@ -182,7 +182,10 @@ function CardLedger({ card, people, monthTransactions, filterPerson, selectedMon
   const spentByPerson = people
     .map(p => ({ person: p, total: sumAmounts(monthTransactions.filter(t => t.personId === p.id)) }))
     .filter(x => x.total > 0);
-  const due = dueLabel(card.dueDay);
+  // Fatura com as compras deste mês (vence no mês seguinte).
+  const invoiceTotal = sumAmounts(monthTransactions);
+  const due = invoiceInfo(card, selectedMonth, invoiceTotal);
+  const dueColor = due?.paid ? 'var(--success)' : due?.urgent ? 'var(--danger)' : 'var(--text-muted)';
 
   return (
     <div className="panel" ref={ref} style={{ marginTop: '1rem', scrollMarginTop: '1rem', scrollMarginBottom: '6rem' }}>
@@ -200,13 +203,25 @@ function CardLedger({ card, people, monthTransactions, filterPerson, selectedMon
 
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem 1.1rem', flexWrap: 'wrap', marginBottom: '0.9rem', fontSize: '0.8rem' }}>
         {readOnly ? (
-          card.dueDay ? <span style={{ color: due?.urgent ? 'var(--danger)' : 'var(--text-dim)' }}>Fatura vence dia {card.dueDay}{due ? ` · ${due.when}` : ''}</span> : null
+          card.dueDay ? <span style={{ color: 'var(--text-dim)' }}>Fatura vence dia {card.dueDay}</span> : null
         ) : (
-          <label className="label-sm">
+          <label className="label-sm" title="As compras de um mês vencem neste dia do mês seguinte">
             Fatura vence dia
             <input type="number" inputMode="numeric" min="1" max="31" placeholder="—" value={card.dueDay || ''} onChange={e => onUpdateDueDay(card.id, e.target.value)} style={{ width: 70 }} />
-            {due && <span style={{ color: due.urgent ? 'var(--danger)' : 'var(--text-muted)' }}>{due.when}</span>}
           </label>
+        )}
+        {due && (
+          <span style={{ color: dueColor, fontWeight: 600 }}>
+            Fatura de {monthLabel(selectedMonth).split(' ')[0]}: {due.paid ? 'paga' : due.text.charAt(0).toLowerCase() + due.text.slice(1)}
+          </span>
+        )}
+        {!readOnly && invoiceTotal > 0 && (
+          <button className={`ghost${due?.paid ? ' active' : ''}`} aria-pressed={!!due?.paid}
+            onClick={() => onToggleInvoice(card.id, selectedMonth)}
+            title={due?.paid ? 'Desmarcar: a fatura volta para "a pagar"' : `Marcar a fatura de ${money(invoiceTotal)} como paga`}
+            style={due?.paid ? { color: 'var(--success)', borderColor: 'var(--success)' } : undefined}>
+            <Check size={14} />{due?.paid ? 'Fatura paga' : 'Marcar fatura como paga'}
+          </button>
         )}
         {!readOnly && (
           <label className="label-sm">

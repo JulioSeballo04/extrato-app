@@ -166,7 +166,7 @@ export default function ExtratoApp({ spacesApi }) {
   const monthBills = buildMonthBills(data, selectedMonth, inScope);
   const calendarBills = buildMonthBills(data, selectedMonth, inScope, true);
   function toggleBill(bill) {
-    if (bill.kind === 'card') toggleInvoicePaid(bill.refId, selectedMonth);
+    if (bill.kind === 'card') toggleInvoicePaid(bill.refId, bill.invoiceMonth);
     else toggleOtherExpensePaid(bill.refId, selectedMonth);
   }
   const billsPaidCount = monthBills.filter(b => b.paid).length;
@@ -501,7 +501,7 @@ export default function ExtratoApp({ spacesApi }) {
         {hasEntries && (
           <MonthOverview
             spent={overview.cardSum + overview.otherSum} cardSum={overview.cardSum} otherSum={overview.otherSum}
-            paid={billsPaid} toPay={billsTotal - billsPaid} overdueCount={billsOverdue} pendingCount={monthBills.length - billsPaidCount}
+            paid={billsPaid} toPay={billsTotal - billsPaid} billsTotal={billsTotal} overdueCount={billsOverdue} pendingCount={monthBills.length - billsPaidCount}
             salary={overview.salary} onOpenBills={() => { setOpenPanel('bills'); scrollToSection('top'); }}
           />
         )}
@@ -511,7 +511,7 @@ export default function ExtratoApp({ spacesApi }) {
             <CardsSection
               cards={cards} people={people} cardTransactions={cardTransactions}
               filterPerson={filterPerson} selectedMonth={selectedMonth} expandedCard={expandedCard} setExpandedCard={setExpandedCard}
-              onAddCard={addCard} onRemoveCard={removeCard} onUpdateDueDay={updateCardDueDay} onUpdateColor={updateCardColor}
+              onAddCard={addCard} onRemoveCard={removeCard} onUpdateDueDay={updateCardDueDay} onUpdateColor={updateCardColor} onToggleInvoice={toggleInvoicePaid}
               onNewEntry={openEntryForm} onRemoveTx={t => removeEntry('cardTransactions', t)} onTogglePaid={toggleCardTransactionPaid} onUpdateTx={updateCardTransaction}
               personName={personName} personColor={personColor} cardGradients={pal.cardGradients} readOnly={readOnly}
               formOpen={cardFormOpen} setFormOpen={setCardFormOpen}
@@ -531,7 +531,8 @@ export default function ExtratoApp({ spacesApi }) {
 
         {hasEntries && show('calendar') && (
           <div id="sec-calendar" data-nav="sec-calendar" style={{ scrollMarginTop: '1rem' }}>
-            <CalendarSection bills={calendarBills} selectedMonth={selectedMonth} personName={personName} personColor={personColor} />
+            <CalendarSection bills={calendarBills} selectedMonth={selectedMonth} personName={personName} personColor={personColor}
+              onToggle={toggleBill} readOnly={readOnly} />
           </div>
         )}
 
