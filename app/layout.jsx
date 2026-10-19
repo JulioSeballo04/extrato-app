@@ -16,6 +16,7 @@ export const viewport = {
   themeColor: '#0F1115',
   width: 'device-width',
   initialScale: 1,
+  viewportFit: 'cover', // permite respeitar a área segura (barra de gestos) no celular
 };
 
 export default function RootLayout({ children }) {

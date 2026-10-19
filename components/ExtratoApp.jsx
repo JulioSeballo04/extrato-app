@@ -1,188 +1,35 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Trash2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Users, Pencil, Check, X, Palette, LogOut, Link2, Eye, SlidersHorizontal, ListChecks, UserRound } from 'lucide-react';
+import { Plus, ChevronLeft, ChevronRight, Users, Link2, Eye, SlidersHorizontal, ListChecks, UserRound, LayoutDashboard, CreditCard, CalendarDays, Receipt, FileText } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { spaceStore, subscribeSpaceData, newId } from '../lib/spaces';
+import { BRAND } from '../lib/brand';
+import { PALETTES, AUTO_PALETTE, DEFAULT_PALETTE, resolvePaletteKey, paletteVars, writeCachedPalette, systemPrefersDark } from '../lib/theme';
+import {
+  DEFAULT_CATEGORY, monthLabel, capitalize, currentMonth, shiftMonth, monthsLaterDate, matchesMonth, isRecurring, isPaidIn,
+  isInvoicePaid, parseDueDay, sumAmounts, buildMonthBills,
+} from '../lib/ledger';
+import { APP_CSS } from './appStyles';
+import { Toast } from './ui';
 import SpacePanel from './SpacePanel';
 import AccountPanel from './AccountPanel';
-import { BRAND } from '../lib/brand';
 import CustomizePanel, { DEFAULT_VISIBLE } from './CustomizePanel';
+import PeopleSection from './sections/People';
+import CardsSection from './sections/Cards';
+import OtherExpensesSection from './sections/OtherExpenses';
+import { EntryForm, PersonChip } from './sections/Entries';
+import { CalendarSection, BillsPanel } from './sections/Calendar';
+import { CategorySummarySection, SummarySection, ReportSection } from './sections/Reports';
+import { MonthOverview, Onboarding } from './sections/Overview';
 
 const VISIBLE_SECTIONS_KEY = 'gestor-de-gastos:secoes-visiveis';
-
-const CATEGORIES = ['Alimentação', 'Compras', 'Mercado', 'Lazer', 'Contas fixas', 'Transporte', 'Saúde', 'Educação', 'Assinaturas', 'Outros'];
-const DEFAULT_CATEGORY = 'Outros';
-
-// Paletas do app: cada opção é um esquema de cores completo (fundo, painéis, bordas,
-// textos, cor de destaque, cores semânticas, cores por pessoa e gradientes de cartão),
-// não só uma cor de destaque isolada. Trocar a paleta muda a aparência inteira do app.
-const PALETTES = {
-  gold: {
-    label: 'Dourado',
-    bg: '#0F1115', panel: '#171A21', panelAlt: '#1B1F27', border: '#22262F', borderStrong: '#2A2F3A', inputBg: '#1F232C',
-    text: '#EDEDEF', textDim: '#9096A3', textMuted: '#6B7280',
-    accent: '#C9A227', accentLight: '#E7C765',
-    success: '#4F9D6E', successBg: '#1E2E2A', danger: '#C1543C', dangerBg: '#2E211B', info: '#5B8DBE',
-    people: ['#C9A227', '#5B8DBE', '#8A6FBF', '#4F9D6E', '#C1543C', '#3FA7A0'],
-    cardGradients: [['#1B2138', '#3A4A78'], ['#3B2A1E', '#8A6136'], ['#1E2E2A', '#2F6E5C'], ['#2A1E2E', '#6E3F8A']],
-  },
-  blue: {
-    label: 'Azul',
-    bg: '#0B1220', panel: '#121B2E', panelAlt: '#16213A', border: '#1E2A42', borderStrong: '#293A57', inputBg: '#17233A',
-    text: '#E7ECF5', textDim: '#8D9BB5', textMuted: '#5E6C87',
-    accent: '#3E7CC9', accentLight: '#7FB0E7',
-    success: '#3FA76E', successBg: '#12281F', danger: '#D1594B', dangerBg: '#301B16', info: '#6FA8DC',
-    people: ['#3E7CC9', '#7FB0E7', '#3FA76E', '#C9A227', '#D1594B', '#8A6FBF'],
-    cardGradients: [['#0F2148', '#22417F'], ['#152C1F', '#1F5C3B'], ['#241636', '#4A2C74'], ['#2E1A12', '#7A3E1D']],
-  },
-  green: {
-    label: 'Verde',
-    bg: '#0D1410', panel: '#141F19', panelAlt: '#182821', border: '#20342A', borderStrong: '#2B4438', inputBg: '#182720',
-    text: '#E8F0EA', textDim: '#8FA89A', textMuted: '#607468',
-    accent: '#3E9D6E', accentLight: '#78CBA1',
-    success: '#4FBE7F', successBg: '#153524', danger: '#C1543C', dangerBg: '#2E2116', info: '#5B9DBE',
-    people: ['#3E9D6E', '#C9A227', '#5B9DBE', '#8A6FBF', '#C1543C', '#78CBA1'],
-    cardGradients: [['#122A20', '#1E6146'], ['#2A2110', '#78652B'], ['#141F30', '#33547F'], ['#241633', '#5A3673']],
-  },
-  purple: {
-    label: 'Roxo',
-    bg: '#130F1B', panel: '#1C1628', panelAlt: '#221B31', border: '#2E2540', borderStrong: '#3D3054', inputBg: '#221A30',
-    text: '#EDE8F5', textDim: '#A398BA', textMuted: '#726690',
-    accent: '#8A6FBF', accentLight: '#B79DE6',
-    success: '#4F9D6E', successBg: '#1B2E22', danger: '#C1543C', dangerBg: '#301F1B', info: '#6F8FD6',
-    people: ['#8A6FBF', '#C9607F', '#3E9D6E', '#C9A227', '#6F8FD6', '#B79DE6'],
-    cardGradients: [['#241633', '#5A3673'], ['#301B2E', '#7A3E6E'], ['#151A33', '#39468C'], ['#20180F', '#6E4A1E']],
-  },
-  rose: {
-    label: 'Rosé',
-    bg: '#170F12', panel: '#221518', panelAlt: '#291A1E', border: '#3A2429', borderStrong: '#4B2E35', inputBg: '#291A1E',
-    text: '#F5E9EC', textDim: '#BA96A0', textMuted: '#8C6871',
-    accent: '#C9607F', accentLight: '#E79FB4',
-    success: '#4F9D6E', successBg: '#1B2E22', danger: '#C1543C', dangerBg: '#301B1B', info: '#8A6FBF',
-    people: ['#C9607F', '#C9A227', '#8A6FBF', '#4F9D6E', '#5B8DBE', '#E79FB4'],
-    cardGradients: [['#301B2E', '#7A3E6E'], ['#3B2A1E', '#8A6136'], ['#1E2E2A', '#2F6E5C'], ['#241636', '#4A2C74']],
-  },
-};
-const DEFAULT_PALETTE = 'gold';
-
-// Cores livres para o cartão (sem nomes, logos ou cores de marca de bancos).
-// O usuário escolhe a cor e digita o nome que quiser no cartão.
-const CARD_COLORS = {
-  roxo: { label: 'Roxo', gradient: ['#7B2FBE', '#46157A'] },
-  vermelho: { label: 'Vermelho', gradient: ['#D23B3B', '#7A1414'] },
-  laranja: { label: 'Laranja', gradient: ['#E8710A', '#8A3D00'] },
-  dourado: { label: 'Dourado', gradient: ['#C9A227', '#6E5410'] },
-  verde: { label: 'Verde', gradient: ['#2E9D5B', '#14532D'] },
-  ciano: { label: 'Ciano', gradient: ['#0EA5C6', '#0B5670'] },
-  azul: { label: 'Azul', gradient: ['#2F6FD9', '#0F3A8A'] },
-  marinho: { label: 'Marinho', gradient: ['#1D4A75', '#0B2240'] },
-  rosa: { label: 'Rosa', gradient: ['#D94A86', '#7D1D4A'] },
-  grafite: { label: 'Grafite', gradient: ['#4A505C', '#1E2128'] },
-};
-// Cartões criados antes guardavam o banco (`bank`); viram a cor mais próxima.
-const LEGACY_BANK_COLORS = { nubank: 'roxo', santander: 'vermelho', itau: 'laranja', mercadopago: 'ciano', portoseguro: 'marinho' };
-// "auto" = cor automática escolhida pela paleta do app.
-function cardColorKey(card) {
-  if (card.color === 'auto') return '';
-  return CARD_COLORS[card.color] ? card.color : LEGACY_BANK_COLORS[card.bank] || '';
-}
-
-function money(v) {
-  return (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-}
-
-function fmtDate(d) {
-  if (!d) return '';
-  const parts = d.slice(5).split('-');
-  return parts.length === 2 ? `${parts[1]}/${parts[0]}` : d;
-}
-
-const MONTH_NAMES_PT = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
-
-function currentMonth() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-}
-function monthLabel(ym) {
-  if (!ym) return '';
-  const [y, m] = ym.split('-').map(Number);
-  return `${MONTH_NAMES_PT[m - 1]} de ${y}`;
-}
-function shiftMonth(ym, delta) {
-  const [y, m] = ym.split('-').map(Number);
-  const d = new Date(y, m - 1 + delta, 1);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-}
-function monthsLaterDate(dateStr, n) {
-  const [y, m, day] = dateStr.split('-').map(Number);
-  const targetMonth = m - 1 + n;
-  // Preserva o dia original (ex.: parcela sempre no dia 10), mas o limita
-  // ao último dia do mês de destino quando ele for mais curto (ex.: dia 31
-  // não vira dia 3 do mês seguinte, vira o último dia daquele mês).
-  const daysInTargetMonth = new Date(y, targetMonth + 1, 0).getDate();
-  const clampedDay = Math.min(day || 1, daysInTargetMonth);
-  const d = new Date(y, targetMonth, clampedDay);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-// Um lançamento "fixo" permanece valendo em todo mês a partir da data em
-// que foi criado (ex.: aluguel, assinatura), não só no mês em que foi lançado.
-// Parcelas nunca se repetem: cada uma já tem o seu mês. (Dados antigos podem ter
-// parcelas marcadas como fixas; elas contariam em dobro a cada mês seguinte.)
-function isRecurring(item) {
-  return !!item?.fixed && !(item.installmentTotal > 1);
-}
-// Pago/pendente em um mês. Um gasto fixo é um único registro que vale todo mês,
-// então guarda os meses pagos (`paidMonths`); os demais têm um `paid` só.
-function isPaidIn(item, month) {
-  return isRecurring(item) ? (item.paidMonths || []).includes(month) : !!item.paid;
-}
-// Fatura do cartão: marcada como paga por mês, no próprio cartão.
-function isInvoicePaid(card, month) {
-  return (card.paidInvoices || []).includes(month);
-}
-function matchesMonth(item, month) {
-  if (!item?.date || !month) return false;
-  const itemMonth = item.date.slice(0, 7);
-  if (itemMonth === month) return true;
-  return isRecurring(item) && itemMonth < month;
-}
-
-// Dia de vencimento da fatura: inteiro de 1 a 31, ou 0 quando não informado.
-function parseDueDay(v) {
-  const n = Math.floor(Number(v));
-  return n >= 1 && n <= 31 ? n : 0;
-}
-function daysInMonth(y, m) {
-  return new Date(y, m + 1, 0).getDate();
-}
-function startOfDay(d) {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
-}
-// Próximo vencimento (hoje conta). Dia 31 em mês de 30 dias vence no último dia.
-function nextDueDate(dueDay, from = new Date()) {
-  if (!dueDay) return null;
-  const today = startOfDay(from);
-  for (let i = 0; i < 2; i++) {
-    const y = today.getFullYear();
-    const m = today.getMonth() + i;
-    const d = new Date(y, m, Math.min(dueDay, daysInMonth(y, m)));
-    if (d >= today) return d;
-  }
-  return null;
-}
-function daysUntil(date, from = new Date()) {
-  return Math.round((startOfDay(date) - startOfDay(from)) / 86400000);
-}
-function dueLabel(dueDay) {
-  const next = nextDueDate(dueDay);
-  if (!next) return null;
-  const n = daysUntil(next);
-  const when = n === 0 ? 'hoje' : n === 1 ? 'amanhã' : `em ${n} dias`;
-  return { text: `Vence dia ${String(next.getDate()).padStart(2, '0')} · ${when}`, urgent: n <= 3 };
-}
-
 const EMPTY_DATA = { people: [], cards: [], cardTransactions: [], otherExpenses: [] };
+const SAVE_ERROR_TOAST = {
+  tone: 'error', persistent: true,
+  text: 'Não consegui salvar ou sincronizar agora. Verifique sua conexão.',
+  action: { label: 'Recarregar', run: () => window.location.reload() },
+};
 
 // Mostra os dados do espaço ativo (ver lib/spaces.js). Cada alteração grava só
 // o item mexido; o Firestore já reflete a mudança na tela na hora (e desfaz
@@ -202,11 +49,17 @@ export default function ExtratoApp({ spacesApi }) {
   const [filterPerson, setFilterPerson] = useState('all');
   const [selectedMonth, setSelectedMonth] = useState(currentMonth());
   const [expandedCard, setExpandedCard] = useState(null);
-  const [storageError, setStorageError] = useState(false);
-  const [confirmClear, setConfirmClear] = useState(false);
-  const paletteKey = PALETTES[profile.paletteKey] ? profile.paletteKey : DEFAULT_PALETTE;
+  const [toast, setToast] = useState(null);
+  const [entryForm, setEntryForm] = useState(null); // { target } com o formulário de novo gasto aberto
+  const [peopleFormOpen, setPeopleFormOpen] = useState(false);
+  const [cardFormOpen, setCardFormOpen] = useState(false);
+  const [systemDark, setSystemDark] = useState(true);
+  const [activeNav, setActiveNav] = useState('top');
   const { people, cards, cardTransactions, otherExpenses } = data;
   const store = spaceId ? spaceStore(spaceId) : null;
+
+  const paletteChoice = profile.paletteKey === AUTO_PALETTE || PALETTES[profile.paletteKey] ? profile.paletteKey : DEFAULT_PALETTE;
+  const pal = PALETTES[resolvePaletteKey(paletteChoice, systemDark)];
 
   // Preferência de quais seções mostrar: fica só neste aparelho (localStorage).
   useEffect(() => {
@@ -224,6 +77,24 @@ export default function ExtratoApp({ spacesApi }) {
     setOpenPanel(p => (p === name ? null : name));
   }
 
+  // Tema "Automático" acompanha o claro/escuro do aparelho.
+  useEffect(() => {
+    setSystemDark(systemPrefersDark());
+    const mq = window.matchMedia?.('(prefers-color-scheme: dark)');
+    if (!mq) return undefined;
+    const onChange = e => setSystemDark(e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+
+  // Barra de status do celular (e do app instalado) na cor de fundo da paleta.
+  useEffect(() => {
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', pal.bg);
+    document.body.style.background = pal.bg;
+    writeCachedPalette(paletteChoice);
+  }, [pal.bg, paletteChoice]);
+
   const loadedOnce = useRef(false);
   useEffect(() => {
     if (!spaceId) return undefined;
@@ -234,9 +105,9 @@ export default function ExtratoApp({ spacesApi }) {
     setExpandedCard(null);
     return subscribeSpaceData(
       spaceId,
-      (next) => { loadedOnce.current = true; setData(next); setStorageError(false); setSyncState('ready'); },
+      (next) => { loadedOnce.current = true; setData(next); clearErrorToast(); setSyncState('ready'); },
       // Já carregou antes: os dados na tela valem, só avisa. Senão, tela de erro.
-      () => { if (loadedOnce.current) setStorageError(true); else setSyncState('failed'); },
+      () => { if (loadedOnce.current) setToast(SAVE_ERROR_TOAST); else setSyncState('failed'); },
     );
   }, [spaceId, retryCount]);
 
@@ -244,49 +115,72 @@ export default function ExtratoApp({ spacesApi }) {
     setSyncState('loading');
     setRetryCount(n => n + 1);
   }
+  function clearErrorToast() {
+    setToast(t => (t?.tone === 'error' ? null : t));
+  }
 
   // Dispara a gravação sem esperar: a tela já mostra o resultado. Se falhar,
   // avisa (o Firestore desfaz a mudança local sozinho).
   function write(promise) {
-    promise.then(() => setStorageError(false), () => setStorageError(true));
+    promise.then(clearErrorToast, () => setToast(SAVE_ERROR_TOAST));
+  }
+
+  // Barra de atalhos do celular: marca a seção que está na tela.
+  useEffect(() => {
+    if (syncState !== 'ready') return undefined;
+    let frame = 0;
+    function onScroll() {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const line = window.innerHeight * 0.35;
+        let current = 'top';
+        for (const el of document.querySelectorAll('[data-nav]')) {
+          if (el.getBoundingClientRect().top <= line) current = el.dataset.nav;
+        }
+        setActiveNav(current);
+      });
+    }
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+    return () => { window.removeEventListener('scroll', onScroll); cancelAnimationFrame(frame); };
+  }, [syncState]);
+
+  function scrollToSection(id) {
+    if (id === 'top') window.scrollTo({ top: 0, behavior: 'smooth' });
+    else document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
   function personTotal(personId, month) {
-    const cardSum = cardTransactions.filter(t => t.personId === personId && (!month || matchesMonth(t, month))).reduce((s, t) => s + Number(t.amount || 0), 0);
-    const otherSum = otherExpenses.filter(t => t.personId === personId && (!month || matchesMonth(t, month))).reduce((s, t) => s + Number(t.amount || 0), 0);
+    const cardSum = sumAmounts(cardTransactions.filter(t => t.personId === personId && (!month || matchesMonth(t, month))));
+    const otherSum = sumAmounts(otherExpenses.filter(t => t.personId === personId && (!month || matchesMonth(t, month))));
     return { cardSum, otherSum, total: cardSum + otherSum };
-  }
-  function cardTotal(cardId, month) {
-    return cardTransactions.filter(t => t.cardId === cardId && (!month || matchesMonth(t, month))).reduce((s, t) => s + Number(t.amount || 0), 0);
   }
   const availableMonths = Array.from(new Set([
     selectedMonth,
+    currentMonth(),
     ...cardTransactions.map(t => t.date && t.date.slice(0, 7)),
     ...otherExpenses.map(t => t.date && t.date.slice(0, 7)),
   ].filter(Boolean))).sort();
-  // Contas do mês para marcar como pagas: a fatura de cada cartão (com o dia de
-  // vencimento, se houver) e cada gasto fora do cartão. Respeita o filtro de pessoa.
+
   const inScope = t => filterPerson === 'all' || t.personId === filterPerson;
-  const [selY, selM] = selectedMonth.split('-').map(Number);
-  const selDim = daysInMonth(selY, selM - 1);
-  const monthBills = [
-    ...cards.map(c => ({
-      kind: 'card', id: `card-${c.id}`, refId: c.id, title: `Fatura ${c.name}`,
-      day: c.dueDay ? Math.min(c.dueDay, selDim) : null,
-      amount: cardTransactions.filter(t => t.cardId === c.id && matchesMonth(t, selectedMonth) && inScope(t)).reduce((s, t) => s + Number(t.amount || 0), 0),
-      paid: isInvoicePaid(c, selectedMonth),
-    })).filter(b => b.amount > 0),
-    ...otherExpenses.filter(e => matchesMonth(e, selectedMonth) && inScope(e)).map(e => ({
-      kind: 'expense', id: e.id, refId: e.id, title: e.description, personId: e.personId,
-      day: Number(e.date.slice(8, 10)) || null, amount: Number(e.amount || 0), paid: isPaidIn(e, selectedMonth),
-      tag: e.installmentTotal > 1 ? `${e.installmentNumber}/${e.installmentTotal}` : isRecurring(e) ? 'FIXO' : null,
-    })),
-  ].sort((a, b) => (a.day || 99) - (b.day || 99));
+  const monthBills = buildMonthBills(data, selectedMonth, inScope);
+  const calendarBills = buildMonthBills(data, selectedMonth, inScope, true);
   function toggleBill(bill) {
     if (bill.kind === 'card') toggleInvoicePaid(bill.refId, selectedMonth);
     else toggleOtherExpensePaid(bill.refId, selectedMonth);
   }
   const billsPaidCount = monthBills.filter(b => b.paid).length;
+  const billsOverdue = monthBills.filter(b => b.status === 'overdue').length;
+
+  // Números do topo (respeitam o filtro de pessoa).
+  const scopePeople = filterPerson === 'all' ? people : people.filter(p => p.id === filterPerson);
+  const overview = scopePeople.reduce((acc, p) => {
+    const t = personTotal(p.id, selectedMonth);
+    acc.cardSum += t.cardSum; acc.otherSum += t.otherSum; acc.salary += Number(p.salary) || 0;
+    return acc;
+  }, { cardSum: 0, otherSum: 0, salary: 0 });
+  const billsPaid = sumAmounts(monthBills.filter(b => b.paid));
+  const billsTotal = sumAmounts(monthBills);
 
   function personName(id) {
     const p = people.find(p => p.id === id);
@@ -294,8 +188,7 @@ export default function ExtratoApp({ spacesApi }) {
   }
   function personColor(id) {
     const idx = people.findIndex(p => p.id === id);
-    const colors = PALETTES[paletteKey]?.people || PALETTES[DEFAULT_PALETTE].people;
-    return colors[idx >= 0 ? idx % colors.length : 0];
+    return pal.people[idx >= 0 ? idx % pal.people.length : 0];
   }
   const nextOrder = list => list.reduce((m, x) => Math.max(m, Number(x.order) || 0), 0) + 1;
 
@@ -309,6 +202,7 @@ export default function ExtratoApp({ spacesApi }) {
       ...cardTransactions.filter(x => x.personId === id).map(x => ['cardTransactions', x.id]),
       ...otherExpenses.filter(x => x.personId === id).map(x => ['otherExpenses', x.id]),
     ]));
+    if (filterPerson === id) setFilterPerson('all');
   }
   function updateSalary(id, salary) {
     const p = people.find(x => x.id === id);
@@ -363,12 +257,20 @@ export default function ExtratoApp({ spacesApi }) {
       }))
     );
   }
-  function addCardTransaction(cardId, tx) {
-    if (!tx.description.trim() || !tx.personId) return;
-    write(store.setMany('cardTransactions', buildEntries(tx, { cardId })));
+  function submitEntry(cardId, entry) {
+    if (!entry.description.trim() || !entry.personId) return;
+    if (cardId) write(store.setMany('cardTransactions', buildEntries(entry, { cardId })));
+    else write(store.setMany('otherExpenses', buildEntries(entry, {})));
+    setEntryForm(null);
+    const entryMonth = entry.date.slice(0, 7);
+    setToast(entryMonth === selectedMonth
+      ? { text: 'Gasto lançado.' }
+      : { text: `Gasto lançado em ${monthLabel(entryMonth)}.`, action: { label: 'Ir para o mês', run: () => setSelectedMonth(entryMonth) } });
   }
-  function removeCardTransaction(id) {
-    write(store.remove('cardTransactions', id));
+  // Apagar um lançamento não pede confirmação: dá para desfazer pelo aviso.
+  function removeEntry(coll, item) {
+    write(store.remove(coll, item.id));
+    setToast({ text: `“${item.description}” apagado.`, action: { label: 'Desfazer', run: () => write(store.set(coll, item.id, item)) } });
   }
   function toggleCardTransactionPaid(id) {
     const t = cardTransactions.find(x => x.id === id);
@@ -387,13 +289,6 @@ export default function ExtratoApp({ spacesApi }) {
   function updateCardTransaction(id, patch) {
     const t = cardTransactions.find(x => x.id === id);
     if (t) write(store.update('cardTransactions', t, editPatch(t, patch)));
-  }
-  function addOtherExpense(exp) {
-    if (!exp.description.trim() || !exp.personId) return;
-    write(store.setMany('otherExpenses', buildEntries(exp, {})));
-  }
-  function removeOtherExpense(id) {
-    write(store.remove('otherExpenses', id));
   }
   // Gasto fixo: marca o mês em `paidMonths`; os demais têm um `paid` só.
   function toggleOtherExpensePaid(id, month) {
@@ -417,34 +312,45 @@ export default function ExtratoApp({ spacesApi }) {
       ...cardTransactions.map(x => ['cardTransactions', x.id]),
       ...otherExpenses.map(x => ['otherExpenses', x.id]),
     ]));
-    setConfirmClear(false);
+    setOpenPanel(null);
+    setFilterPerson('all');
+    setToast({ text: `Dados de “${space?.name}” apagados.` });
   }
 
-  const pal = PALETTES[paletteKey] || PALETTES[DEFAULT_PALETTE];
-
-  // Barra de status do celular (e do app instalado) na cor de fundo da paleta.
-  useEffect(() => {
-    const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute('content', pal.bg);
-  }, [pal.bg]);
+  const rootStyle = {
+    minHeight: '100vh', background: 'var(--bg)', color: 'var(--text)', fontFamily: "'Inter', sans-serif", paddingBottom: '3rem',
+    ...paletteVars(pal),
+  };
 
   if (syncState !== 'ready') {
-    const btn = { border: `1px solid ${pal.borderStrong}`, borderRadius: 8, padding: '0.6rem 1rem', fontWeight: 600, fontSize: '0.875rem', cursor: 'pointer', fontFamily: 'inherit' };
     return (
-      <div style={{ minHeight: '100vh', background: pal.bg, color: pal.textDim, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'Inter, sans-serif', padding: '1rem' }}>
-        {syncState === 'loading' ? 'Carregando extrato…' : (
-          <div style={{ maxWidth: 380, background: pal.panel, border: `1px solid ${pal.border}`, borderRadius: 16, padding: '2rem', textAlign: 'center' }}>
-            <div style={{ color: pal.text, fontWeight: 600, fontSize: '1.05rem', marginBottom: '0.5rem' }}>
-              Não consegui carregar os dados de “{space?.name}”
+      <div className="extrato-app" style={rootStyle}>
+        <style>{APP_CSS}</style>
+        {syncState === 'loading' ? (
+          <div aria-busy="true" aria-label="Carregando seus gastos" style={{ maxWidth: 1180, margin: '0 auto', padding: '2.5rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+            <div className="skeleton" style={{ height: 40, width: 260, maxWidth: '70%' }} />
+            <div className="skeleton" style={{ height: 36, width: 320, maxWidth: '90%' }} />
+            <div className="overview">
+              {[0, 1, 2, 3].map(i => <div key={i} className="skeleton" style={{ height: 92 }} />)}
             </div>
-            <div style={{ fontSize: '0.85rem', marginBottom: '1.25rem' }}>
-              Verifique sua conexão e tente de novo. Seus dados continuam salvos na nuvem.
-            </div>
-            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center', flexWrap: 'wrap' }}>
-              <button onClick={retryLoad} style={{ ...btn, background: pal.accent, color: pal.bg, border: 'none' }}>Tentar de novo</button>
-              {spaceId !== spacesApi.homeSpaceId
-                ? <button onClick={() => spacesApi.setActiveSpace(spacesApi.homeSpaceId)} style={{ ...btn, background: 'transparent', color: pal.textDim }}>Ir para Meus gastos</button>
-                : <button onClick={logout} style={{ ...btn, background: 'transparent', color: pal.textDim }}>Sair</button>}
+            <div className="skeleton" style={{ height: 160 }} />
+            <div className="skeleton" style={{ height: 220 }} />
+          </div>
+        ) : (
+          <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
+            <div className="panel" style={{ maxWidth: 380, padding: '2rem', textAlign: 'center' }}>
+              <div style={{ fontWeight: 600, fontSize: '1.05rem', marginBottom: '0.5rem' }}>
+                Não consegui carregar os dados de “{space?.name}”
+              </div>
+              <p className="muted" style={{ marginBottom: '1.25rem' }}>
+                Verifique sua conexão e tente de novo. Seus dados continuam salvos na nuvem.
+              </p>
+              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+                <button className="primary" onClick={retryLoad}>Tentar de novo</button>
+                {spaceId !== spacesApi.homeSpaceId
+                  ? <button className="ghost" onClick={() => spacesApi.setActiveSpace(spacesApi.homeSpaceId)}>Ir para Meus gastos</button>
+                  : <button className="ghost" onClick={logout}>Sair</button>}
+              </div>
             </div>
           </div>
         )}
@@ -452,127 +358,98 @@ export default function ExtratoApp({ spacesApi }) {
     );
   }
 
-  return (
-    <div className="extrato-app" style={{
-      minHeight: '100vh', background: 'var(--bg)', color: 'var(--text)', fontFamily: "'Inter', sans-serif", paddingBottom: '3rem',
-      '--bg': pal.bg, '--panel': pal.panel, '--panel-alt': pal.panelAlt, '--border': pal.border, '--border-strong': pal.borderStrong, '--input-bg': pal.inputBg,
-      '--text': pal.text, '--text-dim': pal.textDim, '--text-muted': pal.textMuted,
-      '--accent': pal.accent, '--accent-light': pal.accentLight,
-      '--success': pal.success, '--success-bg': pal.successBg, '--danger': pal.danger, '--danger-bg': pal.dangerBg, '--info': pal.info,
-    }}>
-      <style>{`
-        .extrato-app * { box-sizing: border-box; }
-        .extrato-app .display { font-family: 'Fraunces', serif; }
-        .extrato-app .mono { font-family: 'IBM Plex Mono', monospace; }
-        .extrato-app input, .extrato-app select {
-          background: var(--input-bg); border: 1px solid var(--border-strong); color: var(--text);
-          border-radius: 8px; padding: 0.45rem 0.6rem; font-family: inherit; font-size: 0.875rem;
-          outline: none; transition: border-color 0.15s;
-        }
-        .extrato-app input:focus, .extrato-app select:focus { border-color: var(--accent); }
-        .extrato-app input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.8); cursor: pointer; }
-        .extrato-app input[type="number"] { -moz-appearance: textfield; }
-        .extrato-app input[type="number"]::-webkit-outer-spin-button,
-        .extrato-app input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-        .extrato-app input:-webkit-autofill,
-        .extrato-app input:-webkit-autofill:hover,
-        .extrato-app input:-webkit-autofill:focus {
-          -webkit-text-fill-color: var(--text);
-          -webkit-box-shadow: 0 0 0 1000px var(--input-bg) inset;
-          transition: background-color 5000s ease-in-out 0s;
-        }
-        .extrato-app ::-webkit-scrollbar { height: 8px; width: 8px; }
-        .extrato-app ::-webkit-scrollbar-track { background: transparent; }
-        .extrato-app ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; }
-        .extrato-app ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
-        .extrato-app button.primary {
-          background: var(--accent); color: var(--bg); border: none; border-radius: 8px;
-          padding: 0.5rem 0.9rem; font-weight: 600; font-size: 0.875rem; cursor: pointer;
-          display: inline-flex; align-items: center; gap: 0.4rem; transition: filter 0.15s;
-        }
-        .extrato-app button.primary:hover { filter: brightness(1.1); }
-        .extrato-app button.primary:focus-visible, .extrato-app button.ghost:focus-visible, .extrato-app select:focus-visible, .extrato-app input:focus-visible {
-          outline: 2px solid var(--accent-light); outline-offset: 2px;
-        }
-        .extrato-app button.ghost {
-          background: transparent; border: 1px solid var(--border-strong); color: var(--text-dim); border-radius: 8px;
-          padding: 0.4rem 0.7rem; font-size: 0.8rem; cursor: pointer;
-        }
-        .extrato-app button.ghost:hover { border-color: var(--accent); color: var(--text); }
-        .extrato-app button.icon { background: transparent; border: none; color: var(--text-muted); cursor: pointer; padding: 0.25rem; }
-        .extrato-app button.icon:hover { color: var(--danger); }
-        .extrato-app .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 1.25rem; }
-        .extrato-app .credit-card { border-radius: 18px; padding: 1.1rem 1.3rem; position: relative; overflow: hidden; cursor: pointer;
-          transition: transform 0.2s ease; }
-        .extrato-app .credit-card:hover { transform: translateY(-3px); }
-        @media (prefers-reduced-motion: reduce) {
-          .extrato-app .credit-card, .extrato-app button.primary { transition: none; }
-          .extrato-app .credit-card:hover { transform: none; }
-        }
-        @media print {
-          .extrato-app { background: #fff; color: #111; }
-          .extrato-app main > *:not(#relatorio-print-area) { display: none !important; }
-          .extrato-app header { display: none !important; }
-          .extrato-app .no-print { display: none !important; }
-          .extrato-app #relatorio-print-area { background: #fff; border: none; padding: 0; color: #111; }
-          .extrato-app #relatorio-print-area .mono, .extrato-app #relatorio-print-area * { color: #111 !important; }
-        }
-      `}</style>
+  const hasEntries = cardTransactions.length + otherExpenses.length > 0;
+  const showOnboarding = !readOnly && !hasEntries;
+  const canAddEntry = !readOnly && people.length > 0;
+  const openEntryForm = target => setEntryForm({ target });
 
-      <header style={{ padding: '2.5rem 1.5rem 1.5rem', maxWidth: 1180, margin: '0 auto' }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.75rem', flexWrap: 'wrap', justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.75rem', flexWrap: 'wrap' }}>
-            <h1 className="display" style={{ fontSize: '2.1rem', fontWeight: 700, margin: 0, letterSpacing: '-0.01em' }}>{BRAND.name}</h1>
-            <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>{space?.name}</span>
-          </div>
-          <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
-            {spaces.length > 1 && (
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', color: 'var(--text-dim)' }}>
-                <Users size={15} />
+  const navItems = [
+    { id: 'top', label: 'Início', icon: LayoutDashboard },
+    show('cards') && { id: 'sec-cards', label: 'Cartões', icon: CreditCard },
+    show('other') && { id: 'sec-other', label: 'Gastos', icon: Receipt },
+    show('calendar') && hasEntries && { id: 'sec-calendar', label: 'Agenda', icon: CalendarDays },
+    show('report') && hasEntries && { id: 'sec-report', label: 'Relatório', icon: FileText },
+  ].filter(Boolean);
+
+  // Pessoas: no começo é o primeiro passo; depois é cadastro e vai para o fim.
+  const peopleSection = (show('people') || people.length === 0) && (
+    <div id="sec-people" data-nav="sec-people" style={{ scrollMarginTop: '1rem' }}>
+      <PeopleSection
+        people={people} onAdd={addPerson} onRemove={removePerson} onSalary={updateSalary} personColor={personColor} readOnly={readOnly}
+        entryCount={id => cardTransactions.filter(t => t.personId === id).length + otherExpenses.filter(t => t.personId === id).length}
+        formOpen={peopleFormOpen} setFormOpen={setPeopleFormOpen}
+      />
+    </div>
+  );
+
+  return (
+    <div className="extrato-app" style={rootStyle}>
+      <style>{APP_CSS}</style>
+
+      <header className="app-header" style={{ padding: '2.5rem 1.5rem 1.5rem', maxWidth: 1180, margin: '0 auto' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.75rem', flexWrap: 'wrap', minWidth: 0 }}>
+            <h1 className="display app-title" style={{ fontSize: '2.1rem', fontWeight: 700, margin: 0, letterSpacing: '-0.01em' }}>{BRAND.name}</h1>
+            {spaces.length > 1 ? (
+              <label className="no-print label-sm">
+                <Users size={15} aria-hidden="true" />
                 <select value={spaceId} onChange={e => { setOpenPanel(null); spacesApi.setActiveSpace(e.target.value); }} aria-label="Espaço">
                   {spaces.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
               </label>
+            ) : (
+              <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>{space?.name}</span>
             )}
-            <button className="ghost" onClick={() => togglePanel('space')}>
-              <Link2 size={14} style={{ marginRight: 4, verticalAlign: -2 }} />{spaces.length > 1 ? 'Espaços' : 'Compartilhar'}
-            </button>
-            <button className="ghost" onClick={() => togglePanel('customize')}>
-              <SlidersHorizontal size={14} style={{ marginRight: 4, verticalAlign: -2 }} />Personalizar
-            </button>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', color: 'var(--text-dim)' }}>
-              <Palette size={15} />
-              <select value={paletteKey} onChange={e => write(spacesApi.setPaletteKey(e.target.value))} aria-label="Paleta de cores">
-                {Object.entries(PALETTES).map(([key, pal]) => <option key={key} value={key}>{pal.label}</option>)}
-              </select>
-            </label>
-            {!readOnly && (
-              <button className="ghost" onClick={() => (confirmClear ? clearAll() : setConfirmClear(true))}>
-                {confirmClear ? 'Confirmar limpeza' : 'Limpar tudo'}
-              </button>
-            )}
-            <button className="ghost" onClick={() => togglePanel('account')} title={user?.email}>
-              <UserRound size={14} style={{ marginRight: 4, verticalAlign: -2 }} />Conta
-            </button>
-            <button className="ghost" onClick={logout} title="Sair">
-              <LogOut size={14} style={{ marginRight: 4, verticalAlign: -2 }} />Sair
-            </button>
           </div>
+          <nav className="no-print header-actions" aria-label="Opções">
+            <button className={`ghost${openPanel === 'space' ? ' active' : ''}`} onClick={() => togglePanel('space')} aria-expanded={openPanel === 'space'}
+              aria-label={spaces.length > 1 ? 'Espaços' : 'Compartilhar'} title={spaces.length > 1 ? 'Espaços' : 'Compartilhar'}>
+              <Link2 size={15} /><span className="btn-label">{spaces.length > 1 ? 'Espaços' : 'Compartilhar'}</span>
+            </button>
+            <button className={`ghost${openPanel === 'customize' ? ' active' : ''}`} onClick={() => togglePanel('customize')} aria-expanded={openPanel === 'customize'}
+              aria-label="Personalizar" title="Personalizar">
+              <SlidersHorizontal size={15} /><span className="btn-label">Personalizar</span>
+            </button>
+            <button className={`ghost${openPanel === 'account' ? ' active' : ''}`} onClick={() => togglePanel('account')} aria-expanded={openPanel === 'account'}
+              aria-label="Conta" title={user?.email}>
+              <UserRound size={15} /><span className="btn-label">Conta</span>
+            </button>
+          </nav>
         </div>
 
         <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginTop: '1.1rem', flexWrap: 'wrap' }}>
-          <button className="icon" onClick={() => setSelectedMonth(m => shiftMonth(m, -1))} aria-label="Mês anterior"><ChevronLeft size={18} /></button>
-          <select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} style={{ fontWeight: 600, textTransform: 'capitalize' }}>
-            {availableMonths.map(m => <option key={m} value={m} style={{ textTransform: 'capitalize' }}>{monthLabel(m)}</option>)}
+          <button className="icon" onClick={() => setSelectedMonth(m => shiftMonth(m, -1))} aria-label="Mês anterior"><ChevronLeft size={20} /></button>
+          <select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} aria-label="Mês" style={{ fontWeight: 600 }}>
+            {availableMonths.map(m => <option key={m} value={m}>{capitalize(monthLabel(m))}</option>)}
           </select>
-          <button className="icon" onClick={() => setSelectedMonth(m => shiftMonth(m, 1))} aria-label="Próximo mês"><ChevronRight size={18} /></button>
-          <button className="ghost" onClick={() => togglePanel('bills')} style={{ marginLeft: '0.4rem', ...(openPanel === 'bills' ? { borderColor: 'var(--accent)', color: 'var(--text)' } : {}) }}>
-            <ListChecks size={14} style={{ marginRight: 4, verticalAlign: -2 }} />Contas pagas{' '}
+          <button className="icon" onClick={() => setSelectedMonth(m => shiftMonth(m, 1))} aria-label="Próximo mês"><ChevronRight size={20} /></button>
+          {selectedMonth !== currentMonth() && (
+            <button className="ghost" onClick={() => setSelectedMonth(currentMonth())}>Hoje</button>
+          )}
+          <button className={`ghost${openPanel === 'bills' ? ' active' : ''}`} onClick={() => togglePanel('bills')} aria-expanded={openPanel === 'bills'} style={{ marginLeft: '0.2rem' }}>
+            <ListChecks size={15} />Contas
             {monthBills.length > 0 && (
-              <span className="mono" style={{ color: billsPaidCount === monthBills.length ? 'var(--success)' : 'var(--text-muted)' }}>{billsPaidCount}/{monthBills.length}</span>
+              <span className="mono" style={{ color: billsOverdue > 0 ? 'var(--danger)' : billsPaidCount === monthBills.length ? 'var(--success)' : 'var(--text-muted)' }}>
+                {billsPaidCount}/{monthBills.length}
+              </span>
             )}
           </button>
+          <span style={{ flex: 1 }} />
+          {canAddEntry && (
+            <button className="primary desktop-only" onClick={() => openEntryForm(null)}><Plus size={16} />Novo gasto</button>
+          )}
         </div>
+
+        {people.length > 1 && (
+          <div className="no-print" role="group" aria-label="Ver gastos de" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
+            <span className="hint" style={{ marginRight: '0.2rem' }}>Ver gastos de</span>
+            <button className="chip" aria-pressed={filterPerson === 'all'} onClick={() => setFilterPerson('all')}>Todos</button>
+            {people.map(p => (
+              <PersonChip key={p.id} person={p} color={personColor(p.id)} pressed={filterPerson === p.id}
+                onClick={() => setFilterPerson(filterPerson === p.id ? 'all' : p.id)} />
+            ))}
+          </div>
+        )}
 
         {openPanel === 'bills' && (
           <BillsPanel
@@ -581,17 +458,16 @@ export default function ExtratoApp({ spacesApi }) {
             filterLabel={filterPerson === 'all' ? null : personName(filterPerson)}
           />
         )}
-
         {openPanel === 'space' && (
           <SpacePanel spacesApi={spacesApi} userId={user?.uid} onClose={() => setOpenPanel(null)} />
         )}
-
         {openPanel === 'account' && (
-          <AccountPanel spacesApi={spacesApi} data={data} spaceName={space?.name} onClose={() => setOpenPanel(null)} />
+          <AccountPanel spacesApi={spacesApi} data={data} spaceName={space?.name} onClose={() => setOpenPanel(null)}
+            onLogout={logout} onClearAll={readOnly ? null : clearAll} />
         )}
-
         {openPanel === 'customize' && (
-          <CustomizePanel visible={visible} onChange={changeVisible} onClose={() => setOpenPanel(null)} />
+          <CustomizePanel visible={visible} onChange={changeVisible} onClose={() => setOpenPanel(null)}
+            paletteKey={paletteChoice} onPalette={key => write(spacesApi.setPaletteKey(key))} />
         )}
 
         {readOnly && (
@@ -599,1135 +475,110 @@ export default function ExtratoApp({ spacesApi }) {
             display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', marginTop: '1rem',
             padding: '0.6rem 0.9rem', borderRadius: 10, border: '1px solid var(--accent)', background: 'var(--panel)',
           }}>
-            <Eye size={16} color="var(--accent-light)" />
+            <Eye size={16} color="var(--accent-light)" aria-hidden="true" />
             <span style={{ fontSize: '0.85rem', flex: '1 1 200px' }}>
               Você pode só <strong>visualizar</strong> o espaço “{space?.name}”. Para lançar gastos, peça ao dono para mudar seu acesso.
             </span>
           </div>
         )}
-
-        {storageError && (
-          <p style={{ color: 'var(--danger)', fontSize: '0.8rem', marginTop: '0.5rem' }}>
-            Não consegui salvar ou sincronizar agora. Verifique sua conexão; se o erro continuar, recarregue a página.
-          </p>
-        )}
       </header>
 
-      <main style={{ maxWidth: 1180, margin: '0 auto', padding: '0 1.5rem', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-        {show('people') && (
-          <PeopleSection
-            people={people} onAdd={addPerson} onRemove={removePerson} onSalary={updateSalary} personColor={personColor} readOnly={readOnly}
-            entryCount={id => cardTransactions.filter(t => t.personId === id).length + otherExpenses.filter(t => t.personId === id).length}
+      <main className="app-main" style={{ maxWidth: 1180, margin: '0 auto', padding: '0 1.5rem', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+        {showOnboarding && (
+          <Onboarding
+            hasPeople={people.length > 0} hasCards={cards.length > 0} hasEntries={hasEntries}
+            onAddPerson={() => { setPeopleFormOpen(true); scrollToSection('sec-people'); }}
+            onAddCard={() => { if (!show('cards')) changeVisible({ ...visible, cards: true }); setCardFormOpen(true); setTimeout(() => scrollToSection('sec-cards'), 0); }}
+            onAddEntry={() => openEntryForm(null)}
           />
         )}
+        {readOnly && !hasEntries && (
+          <p className="muted">Este espaço ainda não tem gastos lançados.</p>
+        )}
 
-        <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-          <Users size={16} color="var(--text-muted)" />
-          <span style={{ fontSize: '0.85rem', color: 'var(--text-dim)' }}>Ver gastos de:</span>
-          <select value={filterPerson} onChange={e => setFilterPerson(e.target.value)}>
-            <option value="all">Todas as pessoas</option>
-            {people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-        </div>
+        {people.length === 0 && peopleSection}
+
+        {hasEntries && (
+          <MonthOverview
+            spent={overview.cardSum + overview.otherSum} cardSum={overview.cardSum} otherSum={overview.otherSum}
+            paid={billsPaid} toPay={billsTotal - billsPaid} overdueCount={billsOverdue} pendingCount={monthBills.length - billsPaidCount}
+            salary={overview.salary} onOpenBills={() => { setOpenPanel('bills'); scrollToSection('top'); }}
+          />
+        )}
 
         {show('cards') && (
-          <CardsSection
-            cards={cards} people={people} cardTransactions={cardTransactions}
-            filterPerson={filterPerson} selectedMonth={selectedMonth} expandedCard={expandedCard} setExpandedCard={setExpandedCard}
-            onAddCard={addCard} onRemoveCard={removeCard} onUpdateDueDay={updateCardDueDay} onUpdateColor={updateCardColor}
-            onAddTx={addCardTransaction} onRemoveTx={removeCardTransaction} onTogglePaid={toggleCardTransactionPaid} onUpdateTx={updateCardTransaction}
-            cardTotal={cardTotal} personName={personName} personColor={personColor} cardGradients={pal.cardGradients} readOnly={readOnly}
-          />
-        )}
-
-        {show('calendar') && (
-          <CalendarSection
-            cards={cards} cardTransactions={cardTransactions} otherExpenses={otherExpenses}
-            filterPerson={filterPerson} selectedMonth={selectedMonth} personName={personName} personColor={personColor}
-          />
+          <div id="sec-cards" data-nav="sec-cards" style={{ scrollMarginTop: '1rem' }}>
+            <CardsSection
+              cards={cards} people={people} cardTransactions={cardTransactions}
+              filterPerson={filterPerson} selectedMonth={selectedMonth} expandedCard={expandedCard} setExpandedCard={setExpandedCard}
+              onAddCard={addCard} onRemoveCard={removeCard} onUpdateDueDay={updateCardDueDay} onUpdateColor={updateCardColor}
+              onNewEntry={openEntryForm} onRemoveTx={t => removeEntry('cardTransactions', t)} onTogglePaid={toggleCardTransactionPaid} onUpdateTx={updateCardTransaction}
+              personName={personName} personColor={personColor} cardGradients={pal.cardGradients} readOnly={readOnly}
+              formOpen={cardFormOpen} setFormOpen={setCardFormOpen}
+            />
+          </div>
         )}
 
         {show('other') && (
-          <OtherExpensesSection
-            expenses={otherExpenses} people={people} filterPerson={filterPerson} selectedMonth={selectedMonth}
-            onAdd={addOtherExpense} onRemove={removeOtherExpense} onUpdate={updateOtherExpense} onTogglePaid={toggleOtherExpensePaid}
-            personName={personName} personColor={personColor} readOnly={readOnly}
-          />
+          <div id="sec-other" data-nav="sec-other" style={{ scrollMarginTop: '1rem' }}>
+            <OtherExpensesSection
+              expenses={otherExpenses} people={people} filterPerson={filterPerson} selectedMonth={selectedMonth}
+              onNewEntry={openEntryForm} onRemove={e => removeEntry('otherExpenses', e)} onUpdate={updateOtherExpense} onTogglePaid={toggleOtherExpensePaid}
+              personName={personName} personColor={personColor} readOnly={readOnly}
+            />
+          </div>
         )}
 
-        {(show('categories') || show('summary')) && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '2rem', alignItems: 'start' }}>
+        {hasEntries && show('calendar') && (
+          <div id="sec-calendar" data-nav="sec-calendar" style={{ scrollMarginTop: '1rem' }}>
+            <CalendarSection bills={calendarBills} selectedMonth={selectedMonth} personName={personName} personColor={personColor} />
+          </div>
+        )}
+
+        {hasEntries && (show('categories') || show('summary')) && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(340px, 100%), 1fr))', gap: '2rem', alignItems: 'start' }}>
             {show('categories') && (
               <CategorySummarySection
-                people={people} cardTransactions={cardTransactions} otherExpenses={otherExpenses}
+                cardTransactions={cardTransactions} otherExpenses={otherExpenses}
                 filterPerson={filterPerson} selectedMonth={selectedMonth} categoryColors={pal.people}
               />
             )}
-
             {show('summary') && (
               <SummarySection people={people} personTotal={personTotal} personColor={personColor} selectedMonth={selectedMonth} />
             )}
           </div>
         )}
 
-        {show('report') && (
-          <ReportSection
-            people={people} cards={cards} cardTransactions={cardTransactions} otherExpenses={otherExpenses}
-            selectedMonth={selectedMonth} personTotal={personTotal} personColor={personColor}
-          />
+        {people.length > 0 && peopleSection}
+
+        {hasEntries && show('report') && (
+          <div id="sec-report" data-nav="sec-report" className="print-keep" style={{ scrollMarginTop: '1rem' }}>
+            <ReportSection
+              people={people} cards={cards} cardTransactions={cardTransactions} otherExpenses={otherExpenses}
+              selectedMonth={selectedMonth} personTotal={personTotal} personColor={personColor}
+            />
+          </div>
         )}
       </main>
-    </div>
-  );
-}
 
-// Texto da confirmação de exclusão: avisa quantos lançamentos vão junto.
-function entriesNote(n) {
-  return n === 0 ? '' : n === 1 ? ' e 1 lançamento' : ` e ${n} lançamentos`;
-}
-
-function PeopleSection({ people, onAdd, onRemove, onSalary, personColor, readOnly, entryCount }) {
-  const [showForm, setShowForm] = useState(false);
-  const [name, setName] = useState('');
-  const [salary, setSalary] = useState('');
-  const [confirmId, setConfirmId] = useState(null);
-
-  function submit() {
-    onAdd(name, salary);
-    setName(''); setSalary(''); setShowForm(false);
-  }
-
-  return (
-    <section className="panel">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-        <h2 className="display" style={{ fontSize: '1.15rem', margin: 0 }}>Pessoas & salários</h2>
-        {!readOnly && (
-          <button className="ghost" onClick={() => setShowForm(s => !s)}>
-            <Plus size={14} style={{ marginRight: 4, verticalAlign: -2 }} />Pessoa
-          </button>
-        )}
-      </div>
-
-      {people.length === 0 && (
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-          {readOnly ? 'Nenhuma pessoa cadastrada ainda.' : 'Nenhuma pessoa cadastrada ainda. Adicione quem usa as contas.'}
-        </p>
+      {canAddEntry && (
+        <button className="fab no-print" onClick={() => openEntryForm(null)} aria-label="Novo gasto"><Plus size={26} /></button>
       )}
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-        {people.map((p, i) => (
-          <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-            <span style={{ width: 10, height: 10, borderRadius: '50%', background: personColor(p.id), flexShrink: 0 }} />
-            <span style={{ minWidth: 120, fontWeight: 500 }}>{p.name}</span>
-            <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>salário</span>
-            <input type="number" value={p.salary} onChange={e => onSalary(p.id, e.target.value)} style={{ width: 110 }} readOnly={readOnly} />
-            {!readOnly && confirmId !== p.id && (
-              <button className="icon" onClick={() => setConfirmId(p.id)} aria-label={`Remover ${p.name}`}><Trash2 size={15} /></button>
-            )}
-            {!readOnly && confirmId === p.id && (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', fontSize: '0.8rem' }}>
-                <span style={{ color: 'var(--danger)' }}>Apagar {p.name}{entriesNote(entryCount(p.id))}?</span>
-                <button className="ghost" style={{ borderColor: 'var(--danger)', color: 'var(--danger)' }} onClick={() => { setConfirmId(null); onRemove(p.id); }}>Apagar</button>
-                <button className="ghost" onClick={() => setConfirmId(null)}>Cancelar</button>
-              </span>
-            )}
-          </div>
+      <nav className="bottom-nav no-print" aria-label="Seções">
+        {navItems.map(({ id, label, icon: Icon }) => (
+          <button key={id} onClick={() => scrollToSection(id)} aria-current={activeNav === id ? 'true' : undefined}>
+            <Icon size={20} aria-hidden="true" />{label}
+          </button>
         ))}
-      </div>
+      </nav>
 
-      {showForm && !readOnly && (
-        <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem', flexWrap: 'wrap' }}>
-          <input placeholder="Nome" value={name} onChange={e => setName(e.target.value)} style={{ flex: '1 1 140px' }} />
-          <input placeholder="Salário" type="number" value={salary} onChange={e => setSalary(e.target.value)} style={{ width: 110 }} />
-          <button className="primary" onClick={submit}>Adicionar</button>
-        </div>
-      )}
-    </section>
-  );
-}
-
-function CardsSection({ cards, people, cardTransactions, filterPerson, selectedMonth, expandedCard, setExpandedCard, onAddCard, onRemoveCard, onUpdateDueDay, onUpdateColor, onAddTx, onRemoveTx, onTogglePaid, onUpdateTx, cardTotal, personName, personColor, cardGradients, readOnly }) {
-  const [showForm, setShowForm] = useState(false);
-  const [name, setName] = useState('');
-  const [limitValue, setLimitValue] = useState('');
-  const [color, setColor] = useState('');
-  const [dueDay, setDueDay] = useState('');
-  const [confirmCardId, setConfirmCardId] = useState(null);
-
-  function submit() {
-    onAddCard(name, limitValue, color, dueDay);
-    setName(''); setLimitValue(''); setColor(''); setDueDay(''); setShowForm(false);
-  }
-
-  const activeCard = cards.find(c => c.id === expandedCard);
-
-  // Quanto cada pessoa gastou em todos os cartões no mês selecionado.
-  const spentByPerson = people.map(p => ({
-    person: p,
-    total: cardTransactions
-      .filter(t => t.personId === p.id && matchesMonth(t, selectedMonth))
-      .reduce((s, t) => s + Number(t.amount || 0), 0),
-  }));
-  const spentTotal = spentByPerson.reduce((s, x) => s + x.total, 0);
-
-  return (
-    <section>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-        <h2 className="display" style={{ fontSize: '1.15rem', margin: 0 }}>Cartões de crédito</h2>
-        {!readOnly && (
-          <button className="ghost" onClick={() => setShowForm(s => !s)}>
-            <Plus size={14} style={{ marginRight: 4, verticalAlign: -2 }} />Cartão
-          </button>
-        )}
-      </div>
-
-      {showForm && !readOnly && (
-        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
-          <input placeholder="Nome do cartão (ex.: Roxinho)" value={name} onChange={e => setName(e.target.value)} style={{ flex: '1 1 160px' }} />
-          <select value={color} onChange={e => setColor(e.target.value)} style={{ width: 150 }} aria-label="Cor do cartão">
-            <option value="">Cor automática</option>
-            {Object.entries(CARD_COLORS).map(([key, c]) => <option key={key} value={key}>{c.label}</option>)}
-          </select>
-          <input placeholder="Limite" type="number" value={limitValue} onChange={e => setLimitValue(e.target.value)} style={{ width: 110 }} />
-          <input placeholder="Vence dia" type="number" min="1" max="31" value={dueDay} onChange={e => setDueDay(e.target.value)} style={{ width: 100 }} title="Dia do vencimento da fatura" />
-          <button className="primary" onClick={submit}>Adicionar</button>
-        </div>
-      )}
-
-      {cards.length === 0 ? (
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Nenhum cartão cadastrado. Adicione o primeiro para começar a lançar gastos.</p>
-      ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: '1rem' }}>
-          {cards.map((c, i) => {
-            const colorInfo = CARD_COLORS[cardColorKey(c)];
-            const [ca, cb] = colorInfo ? colorInfo.gradient : cardGradients[i % cardGradients.length];
-            const used = cardTotal(c.id, selectedMonth);
-            const pct = c.limitValue > 0 ? Math.min(100, (used / c.limitValue) * 100) : 0;
-            const due = dueLabel(c.dueDay);
-            return (
-              <div key={c.id} className="credit-card" onClick={() => setExpandedCard(expandedCard === c.id ? null : c.id)}
-                style={{ background: `linear-gradient(135deg, ${ca}, ${cb})` }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <div style={{ width: 30, height: 22, borderRadius: 5, background: colorInfo ? 'linear-gradient(135deg, #ffffffcc, #ffffff55)' : 'linear-gradient(135deg,var(--accent-light),var(--accent))' }} />
-                  </div>
-                  {!readOnly && (
-                    <button className="icon" style={{ color: 'rgba(255,255,255,0.6)' }} aria-label={`Remover cartão ${c.name}`} onClick={e => { e.stopPropagation(); setConfirmCardId(c.id); }}>
-                      <Trash2 size={14} />
-                    </button>
-                  )}
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: '1.5rem' }}>
-                  <div>
-                    <div style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.55)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{c.name}</div>
-                    <div className="mono" style={{ fontSize: '0.8rem', color: '#fff' }}>{money(used)} <span style={{ color: 'rgba(255,255,255,0.5)' }}>/ {money(c.limitValue)}</span></div>
-                  </div>
-                  {expandedCard === c.id ? <ChevronUp size={16} color="rgba(255,255,255,0.7)" /> : <ChevronDown size={16} color="rgba(255,255,255,0.7)" />}
-                </div>
-                <div style={{ height: 3, background: 'rgba(255,255,255,0.2)', borderRadius: 2, marginTop: '0.6rem', overflow: 'hidden' }}>
-                  <div style={{ height: '100%', width: `${pct}%`, background: used > c.limitValue ? 'var(--danger)' : (colorInfo ? 'rgba(255,255,255,0.85)' : 'var(--accent-light)') }} />
-                </div>
-                {due && (
-                  <div style={{ fontSize: '0.7rem', fontWeight: 600, marginTop: '0.55rem', color: due.urgent ? '#FFB4A2' : 'rgba(255,255,255,0.75)' }}>
-                    {due.text}
-                  </div>
-                )}
-                {confirmCardId === c.id && (
-                  <div onClick={e => e.stopPropagation()} style={{
-                    position: 'absolute', inset: 0, background: 'rgba(10,10,14,0.88)', cursor: 'default',
-                    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.75rem', padding: '1rem', textAlign: 'center',
-                  }}>
-                    <span style={{ color: '#fff', fontSize: '0.85rem' }}>
-                      Apagar o cartão <strong>{c.name}</strong>{entriesNote(cardTransactions.filter(t => t.cardId === c.id).length)}?
-                    </span>
-                    <span style={{ display: 'flex', gap: '0.5rem' }}>
-                      <button className="ghost" style={{ borderColor: 'var(--danger)', color: '#FFB4A2' }} onClick={() => { setConfirmCardId(null); onRemoveCard(c.id); }}>Apagar</button>
-                      <button className="ghost" style={{ color: '#fff' }} onClick={() => setConfirmCardId(null)}>Cancelar</button>
-                    </span>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {cards.length > 0 && people.length > 0 && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem 1.1rem', flexWrap: 'wrap', marginTop: '0.9rem', fontSize: '0.82rem' }}>
-          <span style={{ color: 'var(--text-muted)' }}>Gasto no cartão em {monthLabel(selectedMonth)}:</span>
-          {spentByPerson.map(({ person, total }) => (
-            <span key={person.id} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
-              <span style={{ width: 8, height: 8, borderRadius: '50%', background: personColor(person.id) }} />
-              {person.name} <span className="mono" style={{ fontWeight: 600 }}>{money(total)}</span>
-            </span>
-          ))}
-          {people.length > 1 && (
-            <span style={{ color: 'var(--text-muted)' }}>· total <span className="mono" style={{ color: 'var(--text-dim)', fontWeight: 600 }}>{money(spentTotal)}</span></span>
-          )}
-        </div>
-      )}
-
-      {activeCard && (
-        <CardLedger
-          card={activeCard}
-          people={people}
-          selectedMonth={selectedMonth}
-          monthTransactions={cardTransactions.filter(t => t.cardId === activeCard.id && matchesMonth(t, selectedMonth))}
-          transactions={cardTransactions.filter(t => t.cardId === activeCard.id && matchesMonth(t, selectedMonth) && (filterPerson === 'all' || t.personId === filterPerson))}
-          onAddTx={onAddTx} onRemoveTx={onRemoveTx} onTogglePaid={onTogglePaid} onUpdateTx={onUpdateTx} onUpdateDueDay={onUpdateDueDay} onUpdateColor={onUpdateColor}
-          personName={personName} personColor={personColor} readOnly={readOnly}
+      {entryForm && (
+        <EntryForm
+          people={people} cards={cards} selectedMonth={selectedMonth} initialTarget={entryForm.target}
+          personColor={personColor} onSubmit={submitEntry} onClose={() => setEntryForm(null)}
         />
       )}
-    </section>
-  );
-}
-
-function CardLedger({ card, people, transactions, monthTransactions, selectedMonth, onAddTx, onRemoveTx, onTogglePaid, onUpdateTx, onUpdateDueDay, onUpdateColor, personName, personColor, readOnly }) {
-  const [desc, setDesc] = useState('');
-  const [amount, setAmount] = useState('');
-  const [personId, setPersonId] = useState(people[0]?.id || '');
-  const [date, setDate] = useState(`${selectedMonth}-01`);
-  const [category, setCategory] = useState(DEFAULT_CATEGORY);
-  const [fixed, setFixed] = useState(false);
-  const [installments, setInstallments] = useState('1');
-  const [paidInstallments, setPaidInstallments] = useState('0');
-  const [splitWith, setSplitWith] = useState([]);
-  const [editingId, setEditingId] = useState(null);
-  const [editDraft, setEditDraft] = useState(null);
-
-  useEffect(() => {
-    if (people.length > 0 && !people.find(p => p.id === personId)) setPersonId(people[0].id);
-  }, [people]);
-
-  useEffect(() => {
-    setSplitWith(prev => prev.filter(id => id !== personId));
-  }, [personId]);
-
-  useEffect(() => {
-    setDate(`${selectedMonth}-01`);
-  }, [selectedMonth]);
-
-  const installmentsNum = Math.max(1, Math.floor(Number(installments)) || 1);
-  const splitCount = 1 + splitWith.length;
-
-  function submit() {
-    onAddTx(card.id, { description: desc, amount, personId, date, category, fixed, installments, paidInstallments, splitWith });
-    setDesc(''); setAmount(''); setCategory(DEFAULT_CATEGORY); setFixed(false); setInstallments('1'); setPaidInstallments('0'); setSplitWith([]);
-  }
-
-  function startEdit(t) {
-    setEditingId(t.id);
-    setEditDraft({ description: t.description, amount: String(t.amount), personId: t.personId, date: t.date, fixed: !!t.fixed, category: t.category || DEFAULT_CATEGORY });
-  }
-  function cancelEdit() {
-    setEditingId(null); setEditDraft(null);
-  }
-  function saveEdit(id) {
-    onUpdateTx(id, editDraft);
-    setEditingId(null); setEditDraft(null);
-  }
-
-  const fixedTotal = transactions.filter(t => isRecurring(t) && matchesMonth(t, selectedMonth)).reduce((s, t) => s + Number(t.amount || 0), 0);
-  const sorted = [...transactions].sort((a, b) => (a.date < b.date ? 1 : -1));
-  const spentByPerson = people
-    .map(p => ({ person: p, total: monthTransactions.filter(t => t.personId === p.id).reduce((s, t) => s + Number(t.amount || 0), 0) }))
-    .filter(x => x.total > 0);
-  const due = dueLabel(card.dueDay);
-
-  return (
-    <div className="panel" style={{ marginTop: '1rem' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.75rem' }}>
-        <h3 style={{ margin: 0, fontSize: '0.95rem', color: 'var(--text-dim)' }}>Lançamentos · {card.name}</h3>
-        {fixedTotal > 0 && (
-          <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>fixos: <span className="mono" style={{ color: 'var(--text-dim)' }}>{money(fixedTotal)}</span>/mês</span>
-        )}
-      </div>
-
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem 1.1rem', flexWrap: 'wrap', marginBottom: '0.9rem', fontSize: '0.8rem' }}>
-        {readOnly ? (
-          card.dueDay ? <span style={{ color: due?.urgent ? 'var(--danger)' : 'var(--text-dim)' }}>Fatura vence dia {card.dueDay}{due ? ` · ${due.text.split(' · ')[1]}` : ''}</span> : null
-        ) : (
-          <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--text-dim)' }}>
-            Fatura vence dia
-            <input type="number" min="1" max="31" placeholder="—" value={card.dueDay || ''} onChange={e => onUpdateDueDay(card.id, e.target.value)} style={{ width: 64 }} />
-            {due && <span style={{ color: due.urgent ? 'var(--danger)' : 'var(--text-muted)' }}>{due.text.split(' · ')[1]}</span>}
-          </label>
-        )}
-        {!readOnly && (
-          <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--text-dim)' }}>
-            Cor
-            <select value={cardColorKey(card)} onChange={e => onUpdateColor(card.id, e.target.value || 'auto')} aria-label="Cor do cartão">
-              <option value="">Automática</option>
-              {Object.entries(CARD_COLORS).map(([key, c]) => <option key={key} value={key}>{c.label}</option>)}
-            </select>
-          </label>
-        )}
-        {spentByPerson.map(({ person, total }) => (
-          <span key={person.id} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', color: 'var(--text-dim)' }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', background: personColor(person.id) }} />
-            {person.name} <span className="mono" style={{ fontWeight: 600, color: 'var(--text)' }}>{money(total)}</span>
-          </span>
-        ))}
-      </div>
-
-      {readOnly ? null : people.length === 0 ? (
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Cadastre uma pessoa acima para lançar gastos neste cartão.</p>
-      ) : (
-        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center', marginBottom: '1rem' }}>
-          <input placeholder="Descrição" value={desc} onChange={e => setDesc(e.target.value)} style={{ flex: '1 1 160px' }} />
-          <input type="number" placeholder="Valor total" value={amount} onChange={e => setAmount(e.target.value)} style={{ width: 100 }} />
-          <select value={personId} onChange={e => setPersonId(e.target.value)}>
-            {people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-          <select value={category} onChange={e => setCategory(e.target.value)}>
-            {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-          </select>
-          <input type="date" value={date} onChange={e => setDate(e.target.value)} />
-          <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem', color: 'var(--text-dim)', cursor: 'pointer' }}>
-            <input type="checkbox" checked={fixed && installmentsNum === 1} disabled={installmentsNum > 1} title={installmentsNum > 1 ? "Parcelas já caem uma por mês; \"fixo\" vale só para gastos sem parcelas" : undefined} onChange={e => setFixed(e.target.checked)} style={{ width: 'auto', padding: 0 }} />
-            fixo
-          </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.78rem', color: 'var(--text-dim)' }}>
-            parcelas
-            <input type="number" min="1" placeholder="1" value={installments}
-              onChange={e => {
-                setInstallments(e.target.value);
-                const max = Math.max(1, Math.floor(Number(e.target.value)) || 1);
-                if (Number(paidInstallments) > max) setPaidInstallments(String(max));
-              }} style={{ width: 60 }} />
-          </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.78rem', color: 'var(--text-dim)' }}>
-            já pagas
-            <input type="number" min="0" max={installmentsNum} placeholder="0" value={paidInstallments}
-              onChange={e => setPaidInstallments(e.target.value)} style={{ width: 60 }} />
-          </label>
-          {people.length > 1 && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.78rem', color: 'var(--text-dim)', flexWrap: 'wrap' }}>
-              dividir com
-              {people.filter(p => p.id !== personId).map(p => (
-                <label key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    checked={splitWith.includes(p.id)}
-                    onChange={e => setSplitWith(prev => e.target.checked ? [...prev, p.id] : prev.filter(id => id !== p.id))}
-                    style={{ width: 'auto', padding: 0 }}
-                  />
-                  {p.name}
-                </label>
-              ))}
-            </div>
-          )}
-          <button className="primary" onClick={submit}><Plus size={14} /> Lançar</button>
-        </div>
-      )}
-      {!readOnly && people.length > 0 && installmentsNum > 1 && (
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '-0.6rem', marginBottom: '0.9rem' }}>
-          Vai gerar {installmentsNum} lançamentos de {money((Number(amount) || 0) / splitCount / installmentsNum)}.{' '}
-          {Number(paidInstallments) > 0
-            ? <>{Number(paidInstallments)} já pagas (datadas antes de {fmtDate(date)}) e {installmentsNum - Number(paidInstallments)} a partir de {fmtDate(date)}, uma por mês.</>
-            : <>Uma por mês a partir de {fmtDate(date)}.</>}
-          {splitCount > 1 && <> Dividido entre {splitCount} pessoas.</>}
-        </p>
-      )}
-      {!readOnly && people.length > 0 && installmentsNum === 1 && splitCount > 1 && (
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '-0.6rem', marginBottom: '0.9rem' }}>
-          Vai gerar {splitCount} lançamentos de {money((Number(amount) || 0) / splitCount)}, um pra cada pessoa.
-        </p>
-      )}
-
-      {sorted.length === 0 ? (
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Nenhum lançamento para esse filtro.</p>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-          {sorted.map(t => (
-            editingId === t.id ? (
-              <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', padding: '0.35rem 0', borderBottom: '1px solid var(--border)', flexWrap: 'wrap', background: 'var(--panel-alt)', borderRadius: 8 }}>
-                <input type="date" value={editDraft.date} onChange={e => setEditDraft(d => ({ ...d, date: e.target.value }))} style={{ width: 130 }} />
-                <select value={editDraft.personId} onChange={e => setEditDraft(d => ({ ...d, personId: e.target.value }))}>
-                  {people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
-                <input value={editDraft.description} onChange={e => setEditDraft(d => ({ ...d, description: e.target.value }))} style={{ flex: '1 1 140px' }} />
-                <select value={editDraft.category} onChange={e => setEditDraft(d => ({ ...d, category: e.target.value }))}>
-                  {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-                <input type="number" value={editDraft.amount} onChange={e => setEditDraft(d => ({ ...d, amount: e.target.value }))} style={{ width: 90 }} />
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.75rem', color: 'var(--text-dim)', cursor: 'pointer' }}>
-                  <input type="checkbox" checked={editDraft.fixed && !(t.installmentTotal > 1)} disabled={t.installmentTotal > 1} onChange={e => setEditDraft(d => ({ ...d, fixed: e.target.checked }))} style={{ width: 'auto', padding: 0 }} />
-                  fixo
-                </label>
-                <button className="icon" onClick={() => saveEdit(t.id)} title="Salvar" style={{ color: 'var(--success)' }}><Check size={16} /></button>
-                <button className="icon" onClick={cancelEdit} title="Cancelar"><X size={16} /></button>
-              </div>
-            ) : (
-              <div key={t.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', fontSize: '0.85rem', padding: '0.45rem 0', borderBottom: '1px solid var(--border)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                  <span className="mono" style={{ color: 'var(--text-muted)' }}>{fmtDate(t.date)}</span>
-                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: personColor(t.personId), flexShrink: 0 }} />
-                  <span style={{ color: 'var(--text-dim)' }}>{personName(t.personId)}</span>
-                  <span style={{ flex: 1 }} />
-                  {t.installmentTotal > 1 && (
-                    <button
-                      onClick={() => onTogglePaid(t.id)}
-                      disabled={readOnly}
-                      style={{
-                        fontSize: '0.65rem', fontWeight: 600, letterSpacing: '0.03em', border: 'none', borderRadius: 4,
-                        padding: '0.15rem 0.45rem', cursor: readOnly ? 'default' : 'pointer',
-                        background: t.paid ? 'var(--success-bg)' : 'var(--danger-bg)', color: t.paid ? 'var(--success)' : 'var(--danger)',
-                      }}
-                      title={readOnly ? undefined : 'Clique para alternar pago/pendente'}
-                    >
-                      {t.paid ? 'PAGA' : 'PENDENTE'}
-                    </button>
-                  )}
-                  <span className="mono" style={{ fontWeight: 600 }}>{money(t.amount)}</span>
-                  {!readOnly && <button className="icon" onClick={() => startEdit(t)} title="Editar"><Pencil size={14} /></button>}
-                  {!readOnly && <button className="icon" onClick={() => onRemoveTx(t.id)}><Trash2 size={14} /></button>}
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
-                  <span style={{ flex: '1 1 auto', minWidth: 80 }}>{t.description}</span>
-                  <span style={{ fontSize: '0.65rem', color: 'var(--text-dim)', background: 'var(--border)', borderRadius: 4, padding: '0.1rem 0.4rem' }}>
-                    {t.category || DEFAULT_CATEGORY}
-                  </span>
-                  {isRecurring(t) && (
-                    <span style={{ fontSize: '0.65rem', color: 'var(--bg)', background: 'var(--accent)', borderRadius: 4, padding: '0.1rem 0.4rem', fontWeight: 600, letterSpacing: '0.03em' }}>FIXO</span>
-                  )}
-                  {t.installmentTotal > 1 && (
-                    <span className="mono" style={{ fontSize: '0.65rem', color: 'var(--bg)', background: 'var(--info)', borderRadius: 4, padding: '0.1rem 0.4rem', fontWeight: 600 }}>
-                      {t.installmentNumber}/{t.installmentTotal}
-                    </span>
-                  )}
-                  {t.splitGroupId && (
-                    <span title={`Dividido entre ${t.splitCount} pessoas`} style={{ fontSize: '0.65rem', color: 'var(--text-dim)', background: 'var(--border)', borderRadius: 4, padding: '0.1rem 0.4rem', fontWeight: 600, letterSpacing: '0.03em' }}>
-                      DIVIDIDO ÷{t.splitCount}
-                    </span>
-                  )}
-                </div>
-              </div>
-            )
-          ))}
-        </div>
-      )}
+      <Toast toast={toast} onClose={() => setToast(null)} />
     </div>
-  );
-}
-
-function OtherExpensesSection({ expenses, people, filterPerson, selectedMonth, onAdd, onRemove, onUpdate, onTogglePaid, personName, personColor, readOnly }) {
-  const [desc, setDesc] = useState('');
-  const [amount, setAmount] = useState('');
-  const [personId, setPersonId] = useState(people[0]?.id || '');
-  const [date, setDate] = useState(`${selectedMonth}-01`);
-  const [fixed, setFixed] = useState(false);
-  const [category, setCategory] = useState(DEFAULT_CATEGORY);
-  const [installments, setInstallments] = useState('1');
-  const [paidInstallments, setPaidInstallments] = useState('0');
-  const [splitWith, setSplitWith] = useState([]);
-  const [onlyFixed, setOnlyFixed] = useState(false);
-  const [editingId, setEditingId] = useState(null);
-  const [editDraft, setEditDraft] = useState(null);
-
-  useEffect(() => {
-    if (people.length > 0 && !people.find(p => p.id === personId)) setPersonId(people[0].id);
-  }, [people]);
-
-  // Se a pessoa selecionada como responsável estiver marcada em "dividir com",
-  // tira ela de lá pra não duplicar.
-  useEffect(() => {
-    setSplitWith(prev => prev.filter(id => id !== personId));
-  }, [personId]);
-
-  useEffect(() => {
-    setDate(`${selectedMonth}-01`);
-  }, [selectedMonth]);
-
-  const installmentsNum = Math.max(1, Math.floor(Number(installments)) || 1);
-  const splitCount = 1 + splitWith.length;
-
-  function submit() {
-    onAdd({ description: desc, amount, personId, date, fixed, category, installments, paidInstallments, splitWith });
-    setDesc(''); setAmount(''); setFixed(false); setCategory(DEFAULT_CATEGORY); setInstallments('1'); setPaidInstallments('0'); setSplitWith([]);
-  }
-
-  function startEdit(e) {
-    setEditingId(e.id);
-    setEditDraft({ description: e.description, amount: String(e.amount), personId: e.personId, date: e.date, fixed: !!e.fixed, category: e.category || DEFAULT_CATEGORY });
-  }
-  function cancelEdit() {
-    setEditingId(null); setEditDraft(null);
-  }
-  function saveEdit(id) {
-    onUpdate(id, editDraft);
-    setEditingId(null); setEditDraft(null);
-  }
-
-  const fixedTotal = expenses.filter(e => isRecurring(e) && matchesMonth(e, selectedMonth)).reduce((s, e) => s + Number(e.amount || 0), 0);
-
-  const filtered = expenses.filter(e => matchesMonth(e, selectedMonth) && (filterPerson === 'all' || e.personId === filterPerson) && (!onlyFixed || isRecurring(e)))
-    .sort((a, b) => (a.date < b.date ? 1 : -1));
-
-  return (
-    <section className="panel">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '1rem' }}>
-        <h2 className="display" style={{ fontSize: '1.15rem', margin: 0 }}>Outros gastos</h2>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.9rem' }}>
-          {fixedTotal > 0 && (
-            <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>fixos: <span className="mono" style={{ color: 'var(--text-dim)' }}>{money(fixedTotal)}</span>/mês</span>
-          )}
-          <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.78rem', color: 'var(--text-dim)', cursor: 'pointer' }}>
-            <input type="checkbox" checked={onlyFixed} onChange={e => setOnlyFixed(e.target.checked)} style={{ width: 'auto', padding: 0 }} />
-            só fixos
-          </label>
-        </div>
-      </div>
-
-      {readOnly ? null : people.length === 0 ? (
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Cadastre uma pessoa acima para lançar gastos.</p>
-      ) : (
-        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center', marginBottom: '1rem' }}>
-          <input placeholder="Descrição (ex: aluguel)" value={desc} onChange={e => setDesc(e.target.value)} style={{ flex: '1 1 180px' }} />
-          <input type="number" placeholder="Valor total" value={amount} onChange={e => setAmount(e.target.value)} style={{ width: 100 }} />
-          <select value={personId} onChange={e => setPersonId(e.target.value)}>
-            {people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-          <select value={category} onChange={e => setCategory(e.target.value)}>
-            {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-          </select>
-          <input type="date" value={date} onChange={e => setDate(e.target.value)} />
-          <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem', color: 'var(--text-dim)', cursor: 'pointer' }}>
-            <input type="checkbox" checked={fixed && installmentsNum === 1} disabled={installmentsNum > 1} title={installmentsNum > 1 ? "Parcelas já caem uma por mês; \"fixo\" vale só para gastos sem parcelas" : undefined} onChange={e => setFixed(e.target.checked)} style={{ width: 'auto', padding: 0 }} />
-            fixo
-          </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.78rem', color: 'var(--text-dim)' }}>
-            parcelas
-            <input type="number" min="1" placeholder="1" value={installments}
-              onChange={e => {
-                setInstallments(e.target.value);
-                const max = Math.max(1, Math.floor(Number(e.target.value)) || 1);
-                if (Number(paidInstallments) > max) setPaidInstallments(String(max));
-              }} style={{ width: 60 }} />
-          </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.78rem', color: 'var(--text-dim)' }}>
-            já pagas
-            <input type="number" min="0" max={installmentsNum} placeholder="0" value={paidInstallments}
-              onChange={e => setPaidInstallments(e.target.value)} style={{ width: 60 }} />
-          </label>
-          {people.length > 1 && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.78rem', color: 'var(--text-dim)', flexWrap: 'wrap' }}>
-              dividir com
-              {people.filter(p => p.id !== personId).map(p => (
-                <label key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    checked={splitWith.includes(p.id)}
-                    onChange={e => setSplitWith(prev => e.target.checked ? [...prev, p.id] : prev.filter(id => id !== p.id))}
-                    style={{ width: 'auto', padding: 0 }}
-                  />
-                  {p.name}
-                </label>
-              ))}
-            </div>
-          )}
-          <button className="primary" onClick={submit}><Plus size={14} /> Lançar</button>
-        </div>
-      )}
-      {!readOnly && people.length > 0 && installmentsNum > 1 && (
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '-0.6rem', marginBottom: '0.9rem' }}>
-          Vai gerar {installmentsNum} lançamentos de {money((Number(amount) || 0) / splitCount / installmentsNum)}.{' '}
-          {Number(paidInstallments) > 0
-            ? <>{Number(paidInstallments)} já pagas (datadas antes de {fmtDate(date)}) e {installmentsNum - Number(paidInstallments)} a partir de {fmtDate(date)}, uma por mês.</>
-            : <>Uma por mês a partir de {fmtDate(date)}. Ex.: financiamento de moto em {installmentsNum}x.</>}
-          {splitCount > 1 && <> Dividido entre {splitCount} pessoas.</>}
-        </p>
-      )}
-      {!readOnly && people.length > 0 && installmentsNum === 1 && splitCount > 1 && (
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '-0.6rem', marginBottom: '0.9rem' }}>
-          Vai gerar {splitCount} lançamentos de {money((Number(amount) || 0) / splitCount)}, um pra cada pessoa.
-        </p>
-      )}
-
-      {filtered.length === 0 ? (
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Nenhum gasto fora do cartão registrado ainda.</p>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-          {filtered.map(e => (
-            editingId === e.id ? (
-              <div key={e.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', padding: '0.35rem 0', borderBottom: '1px solid var(--border)', flexWrap: 'wrap', background: 'var(--panel-alt)', borderRadius: 8 }}>
-                <input type="date" value={editDraft.date} onChange={ev => setEditDraft(d => ({ ...d, date: ev.target.value }))} style={{ width: 130 }} />
-                <select value={editDraft.personId} onChange={ev => setEditDraft(d => ({ ...d, personId: ev.target.value }))}>
-                  {people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
-                <input value={editDraft.description} onChange={ev => setEditDraft(d => ({ ...d, description: ev.target.value }))} style={{ flex: '1 1 140px' }} />
-                <select value={editDraft.category} onChange={ev => setEditDraft(d => ({ ...d, category: ev.target.value }))}>
-                  {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-                <input type="number" value={editDraft.amount} onChange={ev => setEditDraft(d => ({ ...d, amount: ev.target.value }))} style={{ width: 90 }} />
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.75rem', color: 'var(--text-dim)', cursor: 'pointer' }}>
-                  <input type="checkbox" checked={editDraft.fixed && !(e.installmentTotal > 1)} disabled={e.installmentTotal > 1} onChange={ev => setEditDraft(d => ({ ...d, fixed: ev.target.checked }))} style={{ width: 'auto', padding: 0 }} />
-                  fixo
-                </label>
-                <button className="icon" onClick={() => saveEdit(e.id)} title="Salvar" style={{ color: 'var(--success)' }}><Check size={16} /></button>
-                <button className="icon" onClick={cancelEdit} title="Cancelar"><X size={16} /></button>
-              </div>
-            ) : (
-              <div key={e.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', fontSize: '0.85rem', padding: '0.45rem 0', borderBottom: '1px solid var(--border)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                  <span className="mono" style={{ color: 'var(--text-muted)' }}>{fmtDate(e.date)}</span>
-                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: personColor(e.personId), flexShrink: 0 }} />
-                  <span style={{ color: 'var(--text-dim)' }}>{personName(e.personId)}</span>
-                  <span style={{ flex: 1 }} />
-                  <button
-                    onClick={() => onTogglePaid(e.id, selectedMonth)}
-                    disabled={readOnly}
-                    style={{
-                      fontSize: '0.65rem', fontWeight: 600, letterSpacing: '0.03em', border: 'none', borderRadius: 4,
-                      padding: '0.15rem 0.45rem', cursor: readOnly ? 'default' : 'pointer',
-                      background: isPaidIn(e, selectedMonth) ? 'var(--success-bg)' : 'var(--danger-bg)', color: isPaidIn(e, selectedMonth) ? 'var(--success)' : 'var(--danger)',
-                    }}
-                    title={readOnly ? undefined : 'Clique para alternar pago/pendente'}
-                  >
-                    {isPaidIn(e, selectedMonth) ? 'PAGA' : 'PENDENTE'}
-                  </button>
-                  <span className="mono" style={{ fontWeight: 600 }}>{money(e.amount)}</span>
-                  {!readOnly && <button className="icon" onClick={() => startEdit(e)} title="Editar"><Pencil size={14} /></button>}
-                  {!readOnly && <button className="icon" onClick={() => onRemove(e.id)}><Trash2 size={14} /></button>}
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
-                  <span style={{ flex: '1 1 auto', minWidth: 80 }}>{e.description}</span>
-                  <span style={{ fontSize: '0.65rem', color: 'var(--text-dim)', background: 'var(--border)', borderRadius: 4, padding: '0.1rem 0.4rem' }}>
-                    {e.category || DEFAULT_CATEGORY}
-                  </span>
-                  {isRecurring(e) && (
-                    <span style={{ fontSize: '0.65rem', color: 'var(--bg)', background: 'var(--accent)', borderRadius: 4, padding: '0.1rem 0.4rem', fontWeight: 600, letterSpacing: '0.03em' }}>FIXO</span>
-                  )}
-                  {e.installmentTotal > 1 && (
-                    <span className="mono" style={{ fontSize: '0.65rem', color: 'var(--bg)', background: 'var(--info)', borderRadius: 4, padding: '0.1rem 0.4rem', fontWeight: 600 }}>
-                      {e.installmentNumber}/{e.installmentTotal}
-                    </span>
-                  )}
-                  {e.splitGroupId && (
-                    <span title={`Dividido entre ${e.splitCount} pessoas`} style={{ fontSize: '0.65rem', color: 'var(--text-dim)', background: 'var(--border)', borderRadius: 4, padding: '0.1rem 0.4rem', fontWeight: 600, letterSpacing: '0.03em' }}>
-                      DIVIDIDO ÷{e.splitCount}
-                    </span>
-                  )}
-                </div>
-              </div>
-            )
-          ))}
-        </div>
-      )}
-    </section>
-  );
-}
-
-function CategorySummarySection({ people, cardTransactions, otherExpenses, filterPerson, selectedMonth, categoryColors }) {
-  const all = [...cardTransactions, ...otherExpenses].filter(t =>
-    matchesMonth(t, selectedMonth) && (filterPerson === 'all' || t.personId === filterPerson)
-  );
-  const totals = {};
-  let grandTotal = 0;
-  for (const t of all) {
-    const cat = t.category || DEFAULT_CATEGORY;
-    totals[cat] = (totals[cat] || 0) + Number(t.amount || 0);
-    grandTotal += Number(t.amount || 0);
-  }
-  const rows = Object.entries(totals).sort((a, b) => b[1] - a[1]);
-  const catColor = (i) => categoryColors[i % categoryColors.length];
-
-  return (
-    <section className="panel">
-      <h2 className="display" style={{ fontSize: '1.15rem', margin: '0 0 1rem' }}>Gastos por categoria</h2>
-      {rows.length === 0 ? (
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Nenhum gasto categorizado neste mês ainda.</p>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.7rem' }}>
-          {rows.map(([cat, total], i) => {
-            const pct = grandTotal > 0 ? (total / grandTotal) * 100 : 0;
-            return (
-              <div key={cat}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', marginBottom: '0.25rem' }}>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: catColor(i) }} />
-                    {cat}
-                  </span>
-                  <span className="mono" style={{ color: 'var(--text-dim)' }}>{money(total)} <span style={{ color: 'var(--text-muted)' }}>({pct.toFixed(0)}%)</span></span>
-                </div>
-                <div style={{ height: 5, background: 'var(--border)', borderRadius: 3, overflow: 'hidden' }}>
-                  <div style={{ height: '100%', width: `${pct}%`, background: catColor(i), borderRadius: 3 }} />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </section>
-  );
-}
-
-function ReportSection({ people, cards, cardTransactions, otherExpenses, selectedMonth, personTotal, personColor }) {
-  const [target, setTarget] = useState('all');
-  const [open, setOpen] = useState(false);
-
-  function cardName(id) {
-    const c = cards.find(c => c.id === id);
-    return c ? c.name : '—';
-  }
-
-  function movementsFor(personId) {
-    const cardMoves = cardTransactions
-      .filter(t => t.personId === personId && matchesMonth(t, selectedMonth))
-      .map(t => ({ ...t, source: cardName(t.cardId) }));
-    const otherMoves = otherExpenses
-      .filter(t => t.personId === personId && matchesMonth(t, selectedMonth))
-      .map(t => ({ ...t, source: isRecurring(t) ? 'Gasto fixo' : 'Outro gasto' }));
-    return [...cardMoves, ...otherMoves].sort((a, b) => (a.date < b.date ? 1 : -1));
-  }
-
-  const targets = target === 'all' ? people : people.filter(p => p.id === target);
-  const grandTotals = targets.reduce((acc, p) => {
-    const { total } = personTotal(p.id, selectedMonth);
-    acc.salary += Number(p.salary || 0);
-    acc.spent += total;
-    return acc;
-  }, { salary: 0, spent: 0 });
-
-  return (
-    <section className="panel" id="relatorio-print-area">
-      <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '1rem' }}>
-        <h2 className="display" style={{ fontSize: '1.15rem', margin: 0 }}>Relatório</h2>
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          <select value={target} onChange={e => { setTarget(e.target.value); setOpen(false); }}>
-            <option value="all">Todos</option>
-            {people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-          <button className="primary" onClick={() => setOpen(true)}>Gerar relatório</button>
-          {open && <button className="ghost" onClick={() => window.print()}>Imprimir / salvar PDF</button>}
-        </div>
-      </div>
-
-      {!open ? (
-        <p className="no-print" style={{ color: 'var(--text-muted)', fontSize: '0.85rem', margin: 0 }}>
-          Escolha "Todos" ou uma pessoa e clique em "Gerar relatório" para ver o extrato consolidado do mês.
-        </p>
-      ) : people.length === 0 ? (
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Nenhuma pessoa cadastrada.</p>
-      ) : (
-        <div>
-          <div style={{ marginBottom: '1.25rem' }}>
-            <div className="display" style={{ fontSize: '1.3rem' }}>Relatório de gastos</div>
-            <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textTransform: 'capitalize' }}>
-              {monthLabel(selectedMonth)} · {target === 'all' ? 'todas as pessoas' : people.find(p => p.id === target)?.name}
-            </div>
-          </div>
-
-          {targets.map(p => {
-            const moves = movementsFor(p.id);
-            const { total } = personTotal(p.id, selectedMonth);
-            const remaining = p.salary - total;
-            return (
-              <div key={p.id} style={{ marginBottom: '1.5rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
-                  <span style={{ width: 10, height: 10, borderRadius: '50%', background: personColor(p.id) }} />
-                  <span style={{ fontWeight: 600 }}>{p.name}</span>
-                  <span className="mono" style={{ marginLeft: 'auto', fontSize: '0.82rem' }}>
-                    salário {money(p.salary)} · gasto {money(total)} ·{' '}
-                    <span style={{ color: remaining >= 0 ? 'var(--success)' : 'var(--danger)' }}>
-                      {remaining >= 0 ? 'sobra' : 'falta'} {money(Math.abs(remaining))}
-                    </span>
-                  </span>
-                </div>
-                {moves.length === 0 ? (
-                  <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Nenhum gasto neste mês.</p>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                    {moves.map(m => (
-                      <div key={m.id} style={{ display: 'flex', gap: '0.6rem', fontSize: '0.82rem', padding: '0.25rem 0', borderBottom: '1px solid var(--border)', flexWrap: 'wrap' }}>
-                        <span className="mono" style={{ color: 'var(--text-muted)', width: 56 }}>{fmtDate(m.date)}</span>
-                        <span style={{ color: 'var(--text-muted)', width: 130, flexShrink: 0 }}>{m.source}</span>
-                        <span style={{ flex: 1, minWidth: 100 }}>{m.description}</span>
-                        <span className="mono">{money(m.amount)}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-
-          {target === 'all' && people.length > 0 && (
-            <div style={{ borderTop: '1px solid var(--border-strong)', paddingTop: '0.75rem', marginTop: '0.5rem', display: 'flex', justifyContent: 'space-between', fontWeight: 600 }}>
-              <span>Total geral</span>
-              <span className="mono">{money(grandTotals.spent)} <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>de {money(grandTotals.salary)}</span></span>
-            </div>
-          )}
-        </div>
-      )}
-    </section>
-  );
-}
-
-function SummarySection({ people, personTotal, personColor, selectedMonth }) {
-  return (
-    <section className="panel">
-      <h2 className="display" style={{ fontSize: '1.15rem', margin: '0 0 1rem' }}>Resumo do mês</h2>
-      {people.length === 0 ? (
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Cadastre pessoas para ver o resumo.</p>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.1rem' }}>
-          {people.map(p => {
-            const { total, cardSum, otherSum } = personTotal(p.id, selectedMonth);
-            const remaining = p.salary - total;
-            const pct = p.salary > 0 ? Math.min(100, (total / p.salary) * 100) : 0;
-            return (
-              <div key={p.id}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.35rem', flexWrap: 'wrap', gap: '0.3rem' }}>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 500 }}>
-                    <span style={{ width: 10, height: 10, borderRadius: '50%', background: personColor(p.id) }} />
-                    {p.name}
-                  </span>
-                  <span className="mono" style={{ fontSize: '0.85rem', color: remaining >= 0 ? 'var(--success)' : 'var(--danger)' }}>
-                    {remaining >= 0 ? 'sobra ' : 'falta '}{money(Math.abs(remaining))}
-                  </span>
-                </div>
-                <div style={{ height: 6, background: 'var(--border)', borderRadius: 3, overflow: 'hidden' }}>
-                  <div style={{ height: '100%', width: `${pct}%`, background: total > p.salary ? 'var(--danger)' : 'var(--accent)', borderRadius: 3 }} />
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.3rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                  <span>gasto: {money(total)}</span>
-                  <span>salário: {money(p.salary)}</span>
-                </div>
-                <div style={{ marginTop: '0.2rem', fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                  no cartão: {money(cardSum)} · outros gastos: {money(otherSum)}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </section>
-  );
-}
-
-const WEEKDAYS = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
-
-// Calendário do mês selecionado: vencimento das faturas dos cartões e gastos com
-// data (os "fixos" repetem todo mês, no mesmo dia). Respeita o filtro de pessoa.
-function CalendarSection({ cards, cardTransactions, otherExpenses, filterPerson, selectedMonth, personName, personColor }) {
-  const [selectedDay, setSelectedDay] = useState(null);
-
-  const [y, m] = selectedMonth.split('-').map(Number);
-  const dim = daysInMonth(y, m - 1);
-  const isCurrentMonth = selectedMonth === currentMonth();
-  const todayDay = new Date().getDate();
-  const inScope = t => filterPerson === 'all' || t.personId === filterPerson;
-
-  const events = {};
-  function push(day, ev) {
-    if (!events[day]) events[day] = [];
-    events[day].push(ev);
-  }
-
-  for (const c of cards) {
-    if (!c.dueDay) continue;
-    const amount = cardTransactions
-      .filter(t => t.cardId === c.id && matchesMonth(t, selectedMonth) && inScope(t))
-      .reduce((s, t) => s + Number(t.amount || 0), 0);
-    push(Math.min(c.dueDay, dim), { kind: 'card', id: `card-${c.id}`, title: `Fatura ${c.name}`, amount, paid: amount > 0 ? isInvoicePaid(c, selectedMonth) : null });
-  }
-  for (const e of otherExpenses) {
-    if (!matchesMonth(e, selectedMonth) || !inScope(e)) continue;
-    const day = Math.min(Number(e.date.slice(8, 10)) || 1, dim);
-    push(day, {
-      kind: 'expense', id: e.id, title: e.description, amount: Number(e.amount || 0), personId: e.personId,
-      paid: isPaidIn(e, selectedMonth),
-    });
-  }
-
-  const daysWithEvents = Object.keys(events).map(Number).sort((a, b) => a - b);
-  const monthTotal = daysWithEvents.reduce((s, d) => s + events[d].reduce((x, ev) => x + ev.amount, 0), 0);
-  const listDays = selectedDay ? daysWithEvents.filter(d => d === selectedDay) : daysWithEvents;
-
-  const blanks = new Date(y, m - 1, 1).getDay();
-  const cells = [...Array(blanks).fill(null), ...Array.from({ length: dim }, (_, i) => i + 1)];
-
-  return (
-    <section className="panel">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.35rem' }}>
-        <h2 className="display" style={{ fontSize: '1.15rem', margin: 0 }}>Calendário de contas</h2>
-        {monthTotal > 0 && (
-          <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>no mês: <span className="mono" style={{ color: 'var(--text-dim)' }}>{money(monthTotal)}</span></span>
-        )}
-      </div>
-      <p style={{ color: 'var(--text-muted)', fontSize: '0.78rem', margin: '0 0 1rem' }}>
-        Vencimentos das faturas dos cartões e gastos com data. Toque num dia para ver só ele.
-      </p>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 4, marginBottom: '0.5rem' }}>
-        {WEEKDAYS.map(w => (
-          <div key={w} style={{ textAlign: 'center', fontSize: '0.68rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{w}</div>
-        ))}
-        {cells.map((day, i) => {
-          if (!day) return <div key={`b${i}`} />;
-          const evs = events[day] || [];
-          const hasCard = evs.some(ev => ev.kind === 'card');
-          const isToday = isCurrentMonth && day === todayDay;
-          const isSelected = selectedDay === day;
-          return (
-            <button
-              key={day}
-              onClick={() => setSelectedDay(isSelected ? null : day)}
-              aria-label={`Dia ${day}${evs.length ? `, ${evs.length} conta${evs.length > 1 ? 's' : ''}` : ''}`}
-              style={{
-                minHeight: 46, borderRadius: 8, padding: '0.3rem 0.2rem', cursor: 'pointer',
-                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'space-between', gap: 3,
-                background: isSelected ? 'var(--panel-alt)' : 'transparent', color: 'var(--text)', fontFamily: 'inherit',
-                border: `1px solid ${isSelected || hasCard ? 'var(--accent)' : 'var(--border)'}`,
-                opacity: isCurrentMonth && day < todayDay && evs.length === 0 ? 0.5 : 1,
-              }}
-            >
-              <span className="mono" style={{
-                fontSize: '0.8rem', fontWeight: isToday ? 700 : 500, lineHeight: 1,
-                ...(isToday ? { background: 'var(--accent)', color: 'var(--bg)', borderRadius: 999, padding: '0.15rem 0.35rem' } : {}),
-              }}>{day}</span>
-              <span style={{ display: 'flex', gap: 3, height: 6 }}>
-                {evs.slice(0, 4).map(ev => (
-                  <span key={ev.id} style={{ width: 6, height: 6, borderRadius: '50%', background: ev.kind === 'card' ? 'var(--accent-light)' : 'var(--info)' }} />
-                ))}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-
-      <div style={{ display: 'flex', gap: '1rem', fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: '1rem', flexWrap: 'wrap' }}>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent-light)' }} />fatura do cartão</span>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--info)' }} />outro gasto</span>
-      </div>
-
-      {listDays.length === 0 ? (
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', margin: 0 }}>
-          {selectedDay
-            ? `Nenhuma conta no dia ${selectedDay}.`
-            : 'Nada com data neste mês. Cadastre o dia de vencimento dos cartões e lance gastos com data para ver aqui.'}
-        </p>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
-          {listDays.map(day => {
-            const past = isCurrentMonth && day < todayDay;
-            const weekday = WEEKDAYS[new Date(y, m - 1, day).getDay()];
-            const isToday = isCurrentMonth && day === todayDay;
-            return (
-              <div key={day} style={{ opacity: past ? 0.6 : 1 }}>
-                <div style={{ fontSize: '0.78rem', color: isToday ? 'var(--accent-light)' : 'var(--text-muted)', fontWeight: 600, marginBottom: '0.25rem' }}>
-                  Dia {String(day).padStart(2, '0')} · {weekday}{isToday ? ' · hoje' : ''}
-                </div>
-                {events[day].map(ev => (
-                  <div key={ev.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', padding: '0.3rem 0', borderBottom: '1px solid var(--border)', flexWrap: 'wrap' }}>
-                    <span style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, background: ev.kind === 'card' ? 'var(--accent-light)' : 'var(--info)' }} />
-                    <span style={{ flex: '1 1 120px', minWidth: 0 }}>{ev.title}</span>
-                    {ev.kind === 'expense' && (
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--text-dim)', fontSize: '0.78rem' }}>
-                        <span style={{ width: 7, height: 7, borderRadius: '50%', background: personColor(ev.personId) }} />{personName(ev.personId)}
-                      </span>
-                    )}
-                    {ev.paid !== null && (
-                      <span style={{ fontSize: '0.65rem', fontWeight: 600, borderRadius: 4, padding: '0.15rem 0.45rem', background: ev.paid ? 'var(--success-bg)' : 'var(--danger-bg)', color: ev.paid ? 'var(--success)' : 'var(--danger)' }}>
-                        {ev.paid ? 'PAGA' : 'PENDENTE'}
-                      </span>
-                    )}
-                    <span className="mono" style={{ fontWeight: 600 }}>{money(ev.amount)}</span>
-                  </div>
-                ))}
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </section>
-  );
-}
-
-// Painel "Contas pagas": lista as contas do mês selecionado para marcar como
-// pagas. Gastos fixos são marcados mês a mês; faturas, por cartão e mês.
-function BillsPanel({ bills, selectedMonth, onToggle, onClose, personName, personColor, readOnly, filterLabel }) {
-  const total = bills.reduce((s, b) => s + b.amount, 0);
-  const paidTotal = bills.filter(b => b.paid).reduce((s, b) => s + b.amount, 0);
-  const pct = total > 0 ? (paidTotal / total) * 100 : 0;
-  const isCurrentMonth = selectedMonth === currentMonth();
-  const todayDay = new Date().getDate();
-  const pending = bills.filter(b => !b.paid);
-  const paid = bills.filter(b => b.paid);
-
-  function row(b) {
-    const overdue = !b.paid && isCurrentMonth && b.day && b.day < todayDay;
-    return (
-      <label key={b.id} style={{
-        display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap', padding: '0.55rem 0.2rem',
-        borderBottom: '1px solid var(--border)', cursor: readOnly ? 'default' : 'pointer', fontSize: '0.88rem',
-      }}>
-        <input type="checkbox" checked={b.paid} disabled={readOnly} onChange={() => onToggle(b)}
-          style={{ width: 18, height: 18, padding: 0, accentColor: 'var(--success)', flexShrink: 0 }} />
-        <span className="mono" style={{ color: overdue ? 'var(--danger)' : 'var(--text-muted)', fontSize: '0.78rem', width: 44, flexShrink: 0 }}>
-          {b.day ? `dia ${String(b.day).padStart(2, '0')}` : '—'}
-        </span>
-        <span style={{
-          flex: '1 1 140px', minWidth: 0,
-          textDecoration: b.paid ? 'line-through' : 'none', color: b.paid ? 'var(--text-muted)' : 'var(--text)',
-        }}>
-          {b.title}
-          {b.tag && (
-            <span className="mono" style={{ marginLeft: 6, fontSize: '0.65rem', color: 'var(--text-dim)', background: 'var(--border)', borderRadius: 4, padding: '0.1rem 0.35rem' }}>{b.tag}</span>
-          )}
-          {overdue && <span style={{ marginLeft: 6, fontSize: '0.7rem', color: 'var(--danger)', fontWeight: 600 }}>venceu</span>}
-        </span>
-        {b.kind === 'expense' ? (
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--text-dim)', fontSize: '0.78rem' }}>
-            <span style={{ width: 7, height: 7, borderRadius: '50%', background: personColor(b.personId) }} />{personName(b.personId)}
-          </span>
-        ) : (
-          <span style={{ color: 'var(--text-dim)', fontSize: '0.78rem' }}>cartão</span>
-        )}
-        <span className="mono" style={{ fontWeight: 600, color: b.paid ? 'var(--text-muted)' : 'var(--text)' }}>{money(b.amount)}</span>
-      </label>
-    );
-  }
-
-  return (
-    <section className="panel no-print" style={{ marginTop: '1rem' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
-        <h2 className="display" style={{ fontSize: '1.15rem', margin: 0, textTransform: 'none' }}>Contas de {monthLabel(selectedMonth)}</h2>
-        <button className="icon" onClick={onClose} aria-label="Fechar"><X size={16} /></button>
-      </div>
-      <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', margin: '0 0 1rem' }}>
-        {readOnly ? 'Somente leitura.' : 'Marque o que já foi pago. Gastos fixos e faturas são marcados mês a mês.'}
-        {filterLabel && <> Mostrando só as contas de <strong>{filterLabel}</strong>.</>}
-      </p>
-
-      <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.3rem', fontSize: '0.82rem', marginBottom: '0.35rem' }}>
-        <span>pago <span className="mono" style={{ color: 'var(--success)', fontWeight: 600 }}>{money(paidTotal)}</span> de <span className="mono">{money(total)}</span></span>
-        {total - paidTotal > 0.004 && (
-          <span style={{ color: 'var(--text-muted)' }}>falta <span className="mono" style={{ color: 'var(--text-dim)' }}>{money(total - paidTotal)}</span></span>
-        )}
-      </div>
-      <div style={{ height: 6, background: 'var(--border)', borderRadius: 3, overflow: 'hidden', marginBottom: '1rem' }}>
-        <div style={{ height: '100%', width: `${pct}%`, background: 'var(--success)', borderRadius: 3, transition: 'width 0.2s' }} />
-      </div>
-
-      {bills.length === 0 ? (
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', margin: 0 }}>
-          Nenhuma conta neste mês. As faturas dos cartões (com gastos no mês) e os outros gastos aparecem aqui para marcar como pagos.
-        </p>
-      ) : <>
-      <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>A pagar · {pending.length}</div>
-      {pending.length === 0
-        ? <p style={{ color: 'var(--success)', fontSize: '0.85rem', margin: '0.5rem 0 0' }}>Tudo pago neste mês.</p>
-        : <div>{pending.map(row)}</div>}
-
-      {paid.length > 0 && (
-        <>
-          <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: '1.25rem' }}>Pagas · {paid.length}</div>
-          <div>{paid.map(row)}</div>
-        </>
-      )}
-      </>}
-    </section>
   );
 }

@@ -2,7 +2,8 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { X, Download } from 'lucide-react';
+import { Download, LogOut } from 'lucide-react';
+import { PanelHeader } from './ui';
 import { useAuth } from '../context/AuthContext';
 import { exportUserData, accountDeletionPlan, deleteUserData } from '../lib/spaces';
 
@@ -52,7 +53,7 @@ const DELETE_ERRORS = {
   'auth/too-many-requests': 'Muitas tentativas. Aguarde um pouco e tente de novo.',
 };
 
-export default function AccountPanel({ spacesApi, data, spaceName, onClose }) {
+export default function AccountPanel({ spacesApi, data, spaceName, onClose, onLogout, onClearAll }) {
   const { user, signInMethod, reauthenticate, deleteAccount } = useAuth();
   const { spaces } = spacesApi;
   const [busy, setBusy] = useState(false);
@@ -60,6 +61,7 @@ export default function AccountPanel({ spacesApi, data, spaceName, onClose }) {
   const [deleting, setDeleting] = useState(false);
   const [confirmText, setConfirmText] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmClear, setConfirmClear] = useState(false);
   const method = signInMethod();
   const plan = accountDeletionPlan(user.uid, spaces);
 
@@ -105,13 +107,13 @@ export default function AccountPanel({ spacesApi, data, spaceName, onClose }) {
 
   return (
     <section className="panel no-print" style={{ marginTop: '1rem' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
-        <h2 className="display" style={{ fontSize: '1.15rem', margin: 0 }}>Sua conta</h2>
-        <button className="icon" onClick={onClose} aria-label="Fechar"><X size={16} /></button>
+      <PanelHeader title="Sua conta" onClose={onClose} />
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap', margin: '0 0 1.25rem' }}>
+        <p style={{ color: 'var(--text-dim)', fontSize: '0.85rem', margin: 0, wordBreak: 'break-all' }}>
+          {user.email} · entra com {method === 'password' ? 'e-mail e senha' : 'Google'}
+        </p>
+        <button className="ghost" onClick={onLogout}><LogOut size={14} />Sair</button>
       </div>
-      <p style={{ color: 'var(--text-dim)', fontSize: '0.85rem', margin: '0 0 1.25rem', wordBreak: 'break-all' }}>
-        {user.email} · entra com {method === 'password' ? 'e-mail e senha' : 'Google'}
-      </p>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '1.25rem' }}>
         <div>
@@ -138,6 +140,22 @@ export default function AccountPanel({ spacesApi, data, spaceName, onClose }) {
       </div>
 
       <div style={{ marginTop: '1.5rem', paddingTop: '1rem', borderTop: '1px solid var(--border)' }}>
+        <div style={{ ...label, color: 'var(--danger)' }}>Zona de perigo</div>
+        {onClearAll && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
+            {!confirmClear ? (
+              <button className="ghost" onClick={() => setConfirmClear(true)}>Apagar todos os dados de “{spaceName}”</button>
+            ) : (
+              <>
+                <span style={{ fontSize: '0.82rem', color: 'var(--danger)' }}>
+                  Apagar todas as pessoas, cartões e gastos de “{spaceName}”? Isso não pode ser desfeito.
+                </span>
+                <button className="ghost danger" onClick={() => { setConfirmClear(false); onClearAll(); }}>Apagar tudo</button>
+                <button className="ghost" onClick={() => setConfirmClear(false)} autoFocus>Cancelar</button>
+              </>
+            )}
+          </div>
+        )}
         {!deleting ? (
           <button className="ghost" onClick={() => { setDeleting(true); setMessage(null); }}>Excluir minha conta</button>
         ) : (
@@ -161,7 +179,7 @@ export default function AccountPanel({ spacesApi, data, spaceName, onClose }) {
             </div>
             {method !== 'password' && <p style={hint}>Vamos pedir para você entrar com o Google de novo, para confirmar que é você.</p>}
             <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.8rem', flexWrap: 'wrap' }}>
-              <button type="submit" className="ghost" style={{ borderColor: 'var(--danger)', color: 'var(--danger)' }}
+              <button type="submit" className="ghost danger"
                 disabled={busy || confirmText.trim().toUpperCase() !== 'EXCLUIR' || (method === 'password' && !password)}>
                 {busy ? 'Excluindo…' : 'Excluir conta definitivamente'}
               </button>
