@@ -6,6 +6,7 @@ import { Download, LogOut } from 'lucide-react';
 import { PanelHeader } from './ui';
 import { useAuth } from '../context/AuthContext';
 import { exportUserData, accountDeletionPlan, deleteUserData } from '../lib/spaces';
+import { todayStr } from '../lib/ledger';
 
 function download(filename, content, type) {
   const url = URL.createObjectURL(new Blob([content], { type }));
@@ -18,8 +19,9 @@ function download(filename, content, type) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+// Data local (toISOString seria UTC: depois das 21h já seria o dia seguinte).
 function today() {
-  return new Date().toISOString().slice(0, 10);
+  return todayStr();
 }
 
 // Planilha dos lançamentos do espaço atual. Ponto e vírgula e vírgula decimal
@@ -39,10 +41,18 @@ function entriesCsv({ people, cards, cardTransactions, otherExpenses }) {
     })),
     ...otherExpenses.map(t => ({ ...t, tipo: 'Outro gasto', cartao: '' })),
   ].sort((a, b) => (a.date < b.date ? -1 : 1));
-  const header = ['Data', 'Tipo', 'Cartão', 'Descrição', 'Categoria', 'Pessoa', 'Valor', 'Parcela', 'Fixo', 'Pago'];
+  // Pago: no cartão, a fatura daquele mês (ou a parcela lançada como já paga);
+  // num fixo, os meses pagos; nos demais, o próprio lançamento.
+  const paidText = t => {
+    const card = t.cardId && cards.find(c => c.id === t.cardId);
+    if (card) return t.paid || (card.paidInvoices || []).includes(t.date.slice(0, 7)) ? 'sim' : '';
+    if (t.fixed && !(t.installmentTotal > 1)) return (t.paidMonths || []).length ? `meses: ${t.paidMonths.join(', ')}` : '';
+    return t.paid ? 'sim' : '';
+  };
+  const header = ['Data', 'Tipo', 'Cartão', 'Descrição', 'Categoria', 'Pessoa', 'Valor', 'Parcela', 'Fixo', 'Encerrado em', 'Pago'];
   const lines = rows.map(t => [
     t.date, t.tipo, t.cartao, t.description, t.category, personName(t.personId), amount(t.amount),
-    t.installmentTotal > 1 ? `${t.installmentNumber}/${t.installmentTotal}` : '', t.fixed ? 'sim' : '', t.paid ? 'sim' : '',
+    t.installmentTotal > 1 ? `${t.installmentNumber}/${t.installmentTotal}` : '', t.fixed ? 'sim' : '', t.endMonth || '', paidText(t),
   ].map(cell).join(';'));
   return '﻿' + [header.join(';'), ...lines].join('\r\n');
 }

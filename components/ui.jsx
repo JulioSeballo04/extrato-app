@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef } from 'react';
 import { X } from 'lucide-react';
-import { amountFromDigits, amountInput, parseAmount } from '../lib/ledger';
+import { amountInput, parseAmount, nextMoneyText } from '../lib/ledger';
 
 // Peças visuais pequenas, usadas em todas as seções.
 
@@ -99,22 +99,33 @@ export function Toast({ toast, onClose }) {
   );
 }
 
-// Campo de dinheiro: já mostra "R$ 0,00" e a vírgula é automática (os dígitos
-// entram pelos centavos, como nos apps de banco). `value` é o texto formatado
-// ("1.234,50"); quem usa converte com parseAmount. Colar "12,5" também funciona.
+// Campo de dinheiro: já mostra "R$ 0,00". Só dígitos entram pelos centavos,
+// como nos apps de banco; digitando a vírgula, o que veio antes vira reais
+// (ver nextMoneyText). `value` é o texto formatado ("1.234,50"); quem usa
+// converte com parseAmount. Colar "12,5" ou "1.234" também funciona.
 export function MoneyInput({ value, onChange, style, className = '', ...rest }) {
+  const decimals = useRef(null);
+  if (!value) decimals.current = null; // campo limpo (ex.: depois de lançar)
   return (
     <span className="money-input" style={style}>
       <span className="money-prefix" aria-hidden="true">R$</span>
       <input
         {...rest}
         className={`mono ${className}`}
-        inputMode="numeric"
+        inputMode="decimal"
         autoComplete="off"
         placeholder="0,00"
         value={value}
-        onChange={e => onChange(amountFromDigits(e.target.value))}
-        onPaste={e => { e.preventDefault(); onChange(amountInput(parseAmount(e.clipboardData.getData('text')))); }}
+        onChange={e => {
+          const next = nextMoneyText(value, e.target.value, decimals.current);
+          decimals.current = next.decimals;
+          onChange(next.text);
+        }}
+        onPaste={e => {
+          e.preventDefault();
+          decimals.current = null;
+          onChange(amountInput(Math.abs(parseAmount(e.clipboardData.getData('text')))));
+        }}
       />
     </span>
   );

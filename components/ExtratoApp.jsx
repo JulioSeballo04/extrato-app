@@ -167,7 +167,7 @@ export default function ExtratoApp({ spacesApi }) {
 
   const inScope = t => filterPerson === 'all' || t.personId === filterPerson;
   const monthBills = buildMonthBills(data, selectedMonth, inScope);
-  const calendarBills = buildMonthBills(data, selectedMonth, inScope, true);
+  const calendarBills = monthBills; // só contas com valor (sem faturas de R$ 0,00)
   function toggleBill(bill) {
     if (bill.kind === 'card') toggleInvoicePaid(bill.refId, bill.invoiceMonth);
     else toggleOtherExpensePaid(bill.refId, selectedMonth);
@@ -211,6 +211,23 @@ export default function ExtratoApp({ spacesApi }) {
       ...cardTransactions.filter(x => x.personId === id).map(x => ['cardTransactions', x.id]),
       ...otherExpenses.filter(x => x.personId === id).map(x => ['otherExpenses', x.id]),
     ]));
+    // Quem dividia com essa pessoa: atualiza o "Dividido ÷N" (ou tira a divisão
+    // se sobrou uma parte só). `set` regrava o lançamento inteiro sem os campos.
+    for (const coll of ['cardTransactions', 'otherExpenses']) {
+      const list = entriesOf(coll);
+      const groups = new Set(list.filter(x => x.personId === id && x.splitGroupId).map(x => x.splitGroupId));
+      for (const g of groups) {
+        const rest = list.filter(x => x.splitGroupId === g && x.personId !== id);
+        const people = new Set(rest.map(x => x.personId)).size;
+        for (const x of rest) {
+          if (people > 1) write(store.update(coll, x, { splitCount: people }));
+          else {
+            const { splitGroupId, splitCount, ...alone } = x;
+            write(store.set(coll, x.id, alone));
+          }
+        }
+      }
+    }
     if (filterPerson === id) setFilterPerson('all');
   }
   function updateSalary(id, salary) {
@@ -284,13 +301,24 @@ export default function ExtratoApp({ spacesApi }) {
   // Apagar não pede confirmação (dá para desfazer pelo aviso). `scope` vem de
   // changeScopes: só esta / esta e as próximas / a compra inteira; num fixo,
   // 'from' encerra a partir do mês exibido em vez de apagar o histórico.
+  // Num fixo dividido (ex.: aluguel entre duas pessoas), "a partir deste mês"
+  // vale para todas as partes, não só para a de quem clicou.
+  const fixedParts = (coll, item) => (item.splitGroupId
+    ? entriesOf(coll).filter(x => x.splitGroupId === item.splitGroupId && isRecurring(x))
+    : [item]);
+  // Para desfazer: só recria com o autor original se for quem está desfazendo
+  // (as regras não deixam gravar um lançamento em nome de outra pessoa).
+  const ownAuthor = x => (x.createdBy && x.createdBy !== user?.uid ? { ...x, createdBy: undefined } : x);
+
   function removeEntry(coll, item, scope = 'one') {
     if (scope === 'from') {
       const endMonth = shiftMonth(selectedMonth, -1);
-      write(store.update(coll, item, { endMonth }));
+      const parts = fixedParts(coll, item);
+      for (const x of parts) write(store.update(coll, x, { endMonth }));
       setToast({
         text: `“${item.description}” encerrado a partir de ${monthLabel(selectedMonth)}.`,
-        action: { label: 'Desfazer', run: () => write(store.set(coll, item.id, item)) },
+        // As partes ainda existem: regravar como estavam (mesmo autor) tira o encerramento.
+        action: { label: 'Desfazer', run: () => write(store.setMany(coll, parts)) },
       });
       return;
     }
@@ -298,7 +326,7 @@ export default function ExtratoApp({ spacesApi }) {
     write(store.removeMany(items.map(x => [coll, x.id])));
     setToast({
       text: items.length > 1 ? `“${item.description}” apagado (${items.length} lançamentos).` : `“${item.description}” apagado.`,
-      action: { label: 'Desfazer', run: () => write(store.setMany(coll, items)) },
+      action: { label: 'Desfazer', run: () => write(store.setMany(coll, items.map(ownAuthor))) },
     });
   }
 
@@ -314,26 +342,34 @@ export default function ExtratoApp({ spacesApi }) {
       fixed: !(item.installmentTotal > 1) && !!patch.fixed,
       category: patch.category || item.category || DEFAULT_CATEGORY,
     };
-    if (scope === 'from') {
-      // Fixo: o antigo vale até o mês anterior; daqui em diante, um novo com as mudanças.
-      const endMonth = shiftMonth(selectedMonth, -1);
-      if (!clean.fixed) {
-        write(store.update(coll, item, { endMonth: selectedMonth }));
-        return;
-      }
-      const day = (clean.date !== item.date ? clean.date : dueDateIn(item, selectedMonth)).slice(8, 10);
-      const next = {
-        ...item, ...clean, id: newId(), createdBy: user?.uid, date: `${selectedMonth}-${day}`, paid: false,
-        ...(coll === 'otherExpenses' ? { paidMonths: (item.paidMonths || []).filter(m => m >= selectedMonth) } : {}),
-      };
-      write(store.update(coll, item, { endMonth }));
-      write(store.set(coll, next.id, next));
-      return;
-    }
     // Só o que de fato mudou vai para as outras partes (o valor de cada parcela
     // pode diferir em centavos; não mexer nele se não foi editado).
     const shared = Object.fromEntries(['description', 'category', 'amount']
       .filter(k => clean[k] !== item[k]).map(k => [k, clean[k]]));
+
+    if (scope === 'from') {
+      // Fixo: as partes antigas valem até o mês anterior; daqui em diante, novas
+      // partes com as mudanças (com um vínculo de divisão novo, só entre elas).
+      const parts = fixedParts(coll, item);
+      if (!clean.fixed) {
+        for (const x of parts) write(store.update(coll, x, { endMonth: selectedMonth }));
+        return;
+      }
+      const endMonth = shiftMonth(selectedMonth, -1);
+      const newSplitId = parts.length > 1 ? newId() : undefined;
+      for (const x of parts) {
+        const changes = x.id === item.id ? clean : shared;
+        const day = (x.id === item.id && clean.date !== item.date ? clean.date : dueDateIn(x, selectedMonth)).slice(8, 10);
+        const next = {
+          ...x, ...changes, id: newId(), createdBy: user?.uid, date: `${selectedMonth}-${day}`, paid: false, endMonth: x.endMonth,
+          ...(newSplitId ? { splitGroupId: newSplitId } : {}),
+          ...(coll === 'otherExpenses' ? { paidMonths: (x.paidMonths || []).filter(m => m >= selectedMonth) } : {}),
+        };
+        write(store.update(coll, x, { endMonth }));
+        write(store.set(coll, next.id, next));
+      }
+      return;
+    }
     for (const x of entriesInScope(entriesOf(coll), item, scope)) {
       if (x.id === item.id) write(store.update(coll, x, clean));
       else if (Object.keys(shared).length) write(store.update(coll, x, shared));
@@ -464,7 +500,7 @@ export default function ExtratoApp({ spacesApi }) {
 
         <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginTop: '1.1rem', flexWrap: 'wrap' }}>
           <button className="icon" onClick={() => setSelectedMonth(m => shiftMonth(m, -1))} aria-label="Mês anterior"><ChevronLeft size={20} /></button>
-          <select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} aria-label="Mês" style={{ fontWeight: 600 }}>
+          <select value={selectedMonth} onChange={e => { if (/^\d{4}-\d{2}$/.test(e.target.value)) setSelectedMonth(e.target.value); }} aria-label="Mês" style={{ fontWeight: 600 }}>
             {availableMonths.map(m => <option key={m} value={m}>{capitalize(monthLabel(m))}</option>)}
           </select>
           <button className="icon" onClick={() => setSelectedMonth(m => shiftMonth(m, 1))} aria-label="Próximo mês"><ChevronRight size={20} /></button>
@@ -547,7 +583,7 @@ export default function ExtratoApp({ spacesApi }) {
           <MonthOverview
             spent={overview.cardSum + overview.otherSum} cardSum={overview.cardSum} otherSum={overview.otherSum}
             paid={billsPaid} toPay={billsTotal - billsPaid} billsTotal={billsTotal} overdueCount={billsOverdue} pendingCount={monthBills.length - billsPaidCount}
-            salary={overview.salary} onOpenBills={() => { setOpenPanel('bills'); scrollToSection('top'); }}
+            salary={overview.salary} monthName={monthLabel(selectedMonth).split(' ')[0]} onOpenBills={() => { setOpenPanel('bills'); scrollToSection('top'); }}
           />
         )}
 

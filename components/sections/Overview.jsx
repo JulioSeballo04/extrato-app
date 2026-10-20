@@ -4,19 +4,22 @@ import React from 'react';
 import { Check } from 'lucide-react';
 import { money } from '../../lib/ledger';
 
-// Os números do mês, logo no topo: quanto foi gasto, quanto já foi pago,
-// quanto falta pagar e quanto sobra do salário. Respeita o filtro de pessoa.
-export function MonthOverview({ spent, cardSum, otherSum, paid, toPay, billsTotal, overdueCount, pendingCount, salary, onOpenBills }) {
+// Os números do mês, logo no topo. São duas bases diferentes, e os rótulos
+// dizem isso: "Gastos" = o que foi comprado no mês; "A pagar"/"Já pago" = as
+// contas que VENCEM no mês (a fatura do cartão vence no mês seguinte à compra).
+// Respeita o filtro de pessoa.
+export function MonthOverview({ spent, cardSum, otherSum, paid, toPay, billsTotal, overdueCount, pendingCount, salary, onOpenBills, monthName }) {
   const balance = salary - spent;
   return (
-    <section className="overview" aria-label="Resumo do mês">
+    <section aria-label="Resumo do mês">
+    <div className="overview">
       <div className="tile">
-        <div className="tile-label">Gasto no mês</div>
+        <div className="tile-label">Gastos de {monthName}</div>
         <div className="tile-value">{money(spent)}</div>
         <div className="tile-sub">cartão {money(cardSum)} · outros {money(otherSum)}</div>
       </div>
       <button className="tile" onClick={onOpenBills} aria-label={`A pagar: ${money(toPay)}. Abrir contas do mês`}>
-        <div className="tile-label">A pagar</div>
+        <div className="tile-label">A pagar · vence em {monthName}</div>
         <div className="tile-value" style={{ color: overdueCount > 0 ? 'var(--danger)' : undefined }}>{money(toPay)}</div>
         <div className="tile-sub" style={{ color: overdueCount > 0 ? 'var(--danger)' : undefined }}>
           {overdueCount > 0
@@ -25,7 +28,7 @@ export function MonthOverview({ spent, cardSum, otherSum, paid, toPay, billsTota
         </div>
       </button>
       <div className="tile">
-        <div className="tile-label">Já pago</div>
+        <div className="tile-label">Já pago · vence em {monthName}</div>
         <div className="tile-value" style={{ color: 'var(--success)' }}>{money(paid)}</div>
         <div className="tile-sub">{billsTotal > 0 ? `de ${money(billsTotal)} em contas` : 'nenhuma conta vence no mês'}</div>
       </div>
@@ -43,6 +46,11 @@ export function MonthOverview({ spent, cardSum, otherSum, paid, toPay, billsTota
           </>
         )}
       </div>
+    </div>
+    <p className="hint" style={{ marginTop: '0.5rem' }}>
+      “Gastos” são as compras feitas no mês. “A pagar” e “Já pago” são as contas que vencem no mês: a fatura do cartão
+      vence no mês seguinte ao da compra.
+    </p>
     </section>
   );
 }

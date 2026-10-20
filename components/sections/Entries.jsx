@@ -41,6 +41,7 @@ export function EntryForm({ people, cards, selectedMonth, initialTarget, onSubmi
     e.preventDefault();
     const nextErrors = {};
     if (!(value > 0)) nextErrors.amount = 'Informe um valor maior que zero.';
+    else if (minPart <= 0) nextErrors.amount = `Valor pequeno demais para ${parts.length} partes (alguma ficaria com R$ 0,00).`;
     if (!desc.trim()) nextErrors.desc = 'Descreva o gasto (ex.: mercado, aluguel).';
     if (!personId) nextErrors.person = 'Escolha quem gastou.';
     setErrors(nextErrors);
