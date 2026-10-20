@@ -10,7 +10,7 @@ import { money, parseAmount, monthLabel, matchesMonth, isRecurring, invoiceInfo,
 export default function CardsSection({
   cards, people, cardTransactions, filterPerson, selectedMonth, expandedCard, setExpandedCard,
   onAddCard, onRemoveCard, onUpdateDueDay, onUpdateColor, onToggleInvoice, onNewEntry, onRemoveTx, onUpdateTx,
-  personName, personColor, authorName, cardGradients, readOnly, formOpen, setFormOpen,
+  personName, personColor, authorName, members, visibilityLabel, cardGradients, readOnly, formOpen, setFormOpen,
 }) {
   const [name, setName] = useState('');
   const [limitValue, setLimitValue] = useState('');
@@ -201,6 +201,7 @@ export default function CardsSection({
           monthTransactions={cardTransactions.filter(t => t.cardId === activeCard.id && matchesMonth(t, selectedMonth))}
           filterPerson={filterPerson}
           onNewEntry={onNewEntry} onRemoveTx={onRemoveTx} onUpdateTx={onUpdateTx} authorName={authorName}
+          members={members} visibilityLabel={visibilityLabel}
           onUpdateDueDay={onUpdateDueDay} onUpdateColor={onUpdateColor} onToggleInvoice={onToggleInvoice}
           personName={personName} personColor={personColor} readOnly={readOnly}
         />
@@ -292,7 +293,7 @@ function PayeeTile({ payee, owed, entryCount, selectedMonth, expanded, onToggle,
   );
 }
 
-function CardLedger({ card, cards, allTransactions, people, monthTransactions, filterPerson, selectedMonth, onNewEntry, onRemoveTx, onUpdateTx, onUpdateDueDay, onUpdateColor, onToggleInvoice, personName, personColor, authorName, readOnly }) {
+function CardLedger({ card, cards, allTransactions, people, monthTransactions, filterPerson, selectedMonth, onNewEntry, onRemoveTx, onUpdateTx, onUpdateDueDay, onUpdateColor, onToggleInvoice, personName, personColor, authorName, members, visibilityLabel, readOnly }) {
   const ref = useRef(null);
   // Ao abrir um cartão, traz os lançamentos para a tela (no celular ficam lá embaixo).
   useEffect(() => {
@@ -388,7 +389,7 @@ function CardLedger({ card, cards, allTransactions, people, monthTransactions, f
         status={t => (t.installmentTotal > 1 && !payee
           ? <StatusBadge status={t.paid || due?.paid ? 'paid' : 'pending'} readOnly />
           : null)}
-        selectedMonth={selectedMonth} authorName={authorName}
+        selectedMonth={selectedMonth} authorName={authorName} members={members} visibilityLabel={visibilityLabel}
         onUpdate={onUpdateTx} onRemove={onRemoveTx}
         personName={personName} personColor={personColor}
         emptyText={payee

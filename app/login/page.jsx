@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '../../context/AuthContext';
 import { BRAND } from '../../lib/brand';
+import { readPendingInvite } from '../../lib/invite';
 
 function traduzErro(code) {
   const mapa = {
@@ -35,6 +36,10 @@ export default function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
   const [googleSubmitting, setGoogleSubmitting] = useState(false);
   const [notice, setNotice] = useState('');
+
+  // Veio de um link de convite: o código já está guardado e é usado depois de entrar.
+  const [hasInvite, setHasInvite] = useState(false);
+  useEffect(() => { setHasInvite(!!readPendingInvite()); }, []);
 
   function switchMode(next) {
     setMode(next); setError(''); setNotice('');
@@ -169,9 +174,14 @@ export default function LoginPage() {
         <div className="display" style={{ fontSize: '1.5rem', marginBottom: '0.25rem' }}>
           {BRAND.name}
         </div>
-        <div style={{ color: '#6B7280', fontSize: '0.85rem', marginBottom: '1.75rem' }}>
+        <div style={{ color: '#6B7280', fontSize: '0.85rem', marginBottom: hasInvite ? '0.9rem' : '1.75rem' }}>
           {mode === 'login' ? 'Entre para ver suas contas' : mode === 'cadastro' ? 'Crie sua conta para começar' : 'Vamos enviar um link para você criar uma nova senha'}
         </div>
+        {hasInvite && mode !== 'senha' && (
+          <div role="status" style={{ fontSize: '0.82rem', color: '#EDEDEF', background: '#1F232C', border: '1px solid #C9A227', borderRadius: 10, padding: '0.6rem 0.75rem', marginBottom: '1.25rem' }}>
+            Você recebeu um convite para um espaço compartilhado. Entre ou crie sua conta — depois disso você entra no espaço automaticamente.
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
           <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.8rem', color: '#9096A3' }}>

@@ -1,8 +1,10 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Copy, Check, X, Plus } from 'lucide-react';
-import { formatCode, ROLES } from '../lib/spaces';
+import { Copy, Check, X, Plus, Send } from 'lucide-react';
+import { formatCode, ROLES, spaceDisplayName } from '../lib/spaces';
+import { inviteUrl } from '../lib/invite';
+import { BRAND } from '../lib/brand';
 
 const ERROR_MESSAGES = {
   'invite-not-found': 'Código não encontrado. Confira e tente de novo — cada código vale uma vez só.',
@@ -17,7 +19,7 @@ function messageFor(err) {
 }
 
 // Painel do espaço ativo: membros, convites, entrar com código, criar, sair e apagar.
-export default function SpacePanel({ spacesApi, userId, onClose }) {
+export default function SpacePanel({ spacesApi, userId, onClose, onJoined }) {
   const { active: space, spaces, homeSpaceId } = spacesApi;
   const isOwner = space?.ownerId === userId;
   const isHome = space?.id === homeSpaceId;
@@ -54,19 +56,27 @@ export default function SpacePanel({ spacesApi, userId, onClose }) {
     if (code) setInviteCode(code);
   }
 
+  const inviteText = () => `Entre no meu espaço “${space.name}” no ${BRAND.name}: ${inviteUrl(inviteCode)}`;
   async function handleCopy() {
     try {
-      await navigator.clipboard.writeText(formatCode(inviteCode));
+      await navigator.clipboard.writeText(inviteUrl(inviteCode));
       setCopied(true);
     } catch {
       setCopied(false);
     }
   }
+  // No celular abre o "compartilhar" do sistema (WhatsApp etc.); senão, copia a mensagem.
+  async function handleShare() {
+    try {
+      if (navigator.share) await navigator.share({ title: BRAND.name, text: inviteText() });
+      else { await navigator.clipboard.writeText(inviteText()); setCopied(true); }
+    } catch { /* cancelado */ }
+  }
 
   async function handleJoin(e) {
     e.preventDefault();
     const name = await run(() => spacesApi.joinWithCode(codeInput), n => `Você entrou em “${n}”.`);
-    if (name) setCodeInput('');
+    if (name) { setCodeInput(''); onJoined?.(name); }
   }
 
   async function handleCreate(e) {
@@ -91,7 +101,7 @@ export default function SpacePanel({ spacesApi, userId, onClose }) {
           </form>
         ) : (
           <h2 className="display" style={{ fontSize: '1.15rem', margin: 0 }}>
-            {space?.name}
+            {spaceDisplayName(space, userId)}
             {isOwner && (
               <button className="ghost" style={{ marginLeft: '0.6rem', fontFamily: 'Inter, sans-serif' }} onClick={() => setRename(space.name)}>Renomear</button>
             )}
@@ -150,14 +160,20 @@ export default function SpacePanel({ spacesApi, userId, onClose }) {
             </div>
             {inviteCode && (
               <div style={{ marginTop: '0.75rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                  <span className="mono" style={{ fontSize: '1.25rem', letterSpacing: '0.08em', color: 'var(--accent-light)' }}>{formatCode(inviteCode)}</span>
+                <div className="mono" style={{ fontSize: '0.8rem', wordBreak: 'break-all', padding: '0.5rem 0.6rem', borderRadius: 8, background: 'var(--input-bg)', border: '1px solid var(--border-strong)' }}>
+                  {inviteUrl(inviteCode)}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
+                  <button className="primary" onClick={handleShare}><Send size={14} />Enviar convite</button>
                   <button className="ghost" onClick={handleCopy}>
-                    {copied ? <Check size={14} style={{ marginRight: 4, verticalAlign: -2 }} /> : <Copy size={14} style={{ marginRight: 4, verticalAlign: -2 }} />}
-                    {copied ? 'Copiado' : 'Copiar'}
+                    {copied ? <Check size={14} /> : <Copy size={14} />}
+                    {copied ? 'Copiado' : 'Copiar link'}
                   </button>
                 </div>
-                <p style={hint}>A pessoa digita esse código em “Entrar em um espaço”, no app dela. Vale por 24 horas e uma vez só.</p>
+                <p style={hint}>
+                  A pessoa abre o link, entra (ou cria a conta) e já cai neste espaço. Ou digita o código
+                  {' '}<strong className="mono">{formatCode(inviteCode)}</strong> em “Entrar em um espaço”. Vale por 24 horas e uma vez só.
+                </p>
               </div>
             )}
           </div>

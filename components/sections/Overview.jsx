@@ -93,3 +93,33 @@ export function Onboarding({ hasPeople, hasCards, hasEntries, onAddPerson, onAdd
     </section>
   );
 }
+
+// Num espaço compartilhado: qual pessoa da lista é quem está usando o app.
+// Com isso, o "Novo gasto" já começa nessa pessoa e o "lançado por" usa o nome dela.
+export function WhoAreYou({ spaceId, people, personColor, onPick, onNew }) {
+  const key = `gestor-de-gastos:quem-sou-dispensado:${spaceId}`;
+  const [hidden, setHidden] = React.useState(() => {
+    try { return localStorage.getItem(key) === '1'; } catch { return false; }
+  });
+  if (hidden) return null;
+  const free = people.filter(p => !p.uid);
+  return (
+    <section className="panel" style={{ borderColor: 'var(--accent)' }}>
+      <h2 className="display section-title">Qual dessas pessoas é você?</h2>
+      <p className="hint" style={{ margin: '0.3rem 0 0.8rem' }}>
+        Assim o “Novo gasto” já começa com você e os outros membros veem o seu nome no que você lançar.
+      </p>
+      <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+        {free.map(p => (
+          <button key={p.id} type="button" className="chip" onClick={() => onPick(p.id)}>
+            <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: '50%', background: personColor(p.id) }} />{p.name}
+          </button>
+        ))}
+        <button type="button" className="ghost" onClick={onNew}>Não estou na lista</button>
+        <button type="button" className="ghost" onClick={() => { setHidden(true); try { localStorage.setItem(key, '1'); } catch { /* ignora */ } }}>
+          Agora não
+        </button>
+      </div>
+    </section>
+  );
+}

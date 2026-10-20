@@ -3,7 +3,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Plus, ChevronLeft, ChevronRight, Users, Link2, Eye, SlidersHorizontal, ListChecks, UserRound, LayoutDashboard, CreditCard, CalendarDays, Receipt, FileText } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { spaceStore, subscribeSpaceData, newId } from '../lib/spaces';
+import { spaceStore, subscribeSpaceData, newId, spaceDisplayName } from '../lib/spaces';
+import { readPendingInvite, clearPendingInvite } from '../lib/invite';
 import { BRAND } from '../lib/brand';
 import { PALETTES, AUTO_PALETTE, DEFAULT_PALETTE, resolvePaletteKey, paletteVars, writeCachedPalette, systemPrefersDark } from '../lib/theme';
 import {
@@ -21,7 +22,7 @@ import OtherExpensesSection from './sections/OtherExpenses';
 import { EntryForm, PersonChip } from './sections/Entries';
 import { CalendarSection, BillsPanel } from './sections/Calendar';
 import { CategorySummarySection, SummarySection, ReportSection } from './sections/Reports';
-import { MonthOverview, Onboarding } from './sections/Overview';
+import { MonthOverview, Onboarding, WhoAreYou } from './sections/Overview';
 
 const VISIBLE_SECTIONS_KEY = 'gestor-de-gastos:secoes-visiveis';
 const EMPTY_DATA = { people: [], cards: [], cardTransactions: [], otherExpenses: [] };
@@ -56,7 +57,9 @@ export default function ExtratoApp({ spacesApi }) {
   const [systemDark, setSystemDark] = useState(true);
   const [activeNav, setActiveNav] = useState('top');
   const { people, cards, cardTransactions, otherExpenses } = data;
-  const store = spaceId ? spaceStore(spaceId) : null;
+  // Ocultos (ex.: presente): o store manda cada um para hiddenEntries sozinho.
+  const hiddenIds = new Set([...cardTransactions, ...otherExpenses].filter(x => x.visibleTo?.length).map(x => x.id));
+  const store = spaceId ? spaceStore(spaceId, hiddenIds) : null;
 
   const paletteChoice = profile.paletteKey === AUTO_PALETTE || PALETTES[profile.paletteKey] ? profile.paletteKey : DEFAULT_PALETTE;
   const pal = PALETTES[resolvePaletteKey(paletteChoice, systemDark)];
@@ -104,12 +107,32 @@ export default function ExtratoApp({ spacesApi }) {
     setFilterPerson('all');
     setExpandedCard(null);
     return subscribeSpaceData(
-      spaceId,
+      spaceId, user?.uid,
       (next) => { loadedOnce.current = true; setData(next); clearErrorToast(); setSyncState('ready'); },
       // Já carregou antes: os dados na tela valem, só avisa. Senão, tela de erro.
       () => { if (loadedOnce.current) setToast(SAVE_ERROR_TOAST); else setSyncState('failed'); },
     );
   }, [spaceId, retryCount]);
+
+  const invitePending = useRef(false);
+  useEffect(() => {
+    if (syncState !== 'ready' || invitePending.current) return;
+    const code = readPendingInvite();
+    if (!code) return;
+    invitePending.current = true;
+    clearPendingInvite();
+    spacesApi.joinWithCode(code).then(
+      name => setToast({ text: `Você entrou em “${name}”.` }),
+      err => setToast({
+        tone: 'error',
+        text: {
+          'invite-not-found': 'Esse convite não existe mais (cada um vale uma vez só). Peça um novo.',
+          'invite-expired': 'Esse convite expirou. Peça um novo para quem convidou.',
+          'already-member': 'Você já participa desse espaço.',
+        }[err?.code] || 'Não consegui usar o convite. Tente de novo pelo código em Compartilhar.',
+      }),
+    );
+  }, [syncState]);
 
   function retryLoad() {
     setSyncState('loading');
@@ -198,7 +221,31 @@ export default function ExtratoApp({ spacesApi }) {
   function authorName(uid) {
     if (!uid || (space?.members?.length || 0) < 2) return null;
     if (uid === user?.uid) return 'você';
-    return (space.labels?.[uid] || '').split('@')[0] || null;
+    return people.find(p => p.uid === uid)?.name || (space.labels?.[uid] || '').split('@')[0] || null;
+  }
+  // Outros membros do espaço (para "Esconder de…"), com o nome da pessoa ligada.
+  const memberName = uid => people.find(p => p.uid === uid)?.name || (space?.labels?.[uid] || '').split('@')[0] || 'membro';
+  const otherMembers = (space?.members || []).filter(u => u !== user?.uid).map(uid => ({ uid, label: memberName(uid) }));
+  function visibilityLabel(item) {
+    if (!item.visibleTo?.length) return null;
+    const from = (space?.members || []).filter(u => !item.visibleTo.includes(u)).map(memberName);
+    return from.length ? `Oculto de ${from.join(', ')}` : 'Oculto de membros novos';
+  }
+  const visibleToFor = hideFrom => (hideFrom?.length ? (space?.members || []).filter(u => !hideFrom.includes(u)) : null);
+
+  // Conta ↔ pessoa: qual pessoa da lista é quem está usando o app.
+  const myPerson = people.find(p => p.uid === user?.uid) || null;
+  const memberLabel = uid => (uid === user?.uid ? 'você' : (space?.labels?.[uid] || '').split('@')[0] || 'outro membro');
+  function linkMeToPerson(personId) {
+    const p = people.find(x => x.id === personId);
+    if (!p) return;
+    write(store.update('people', p, { uid: user.uid }));
+    setToast({ text: `Pronto: você é “${p.name}” neste espaço.` });
+  }
+  function addMeAsPerson() {
+    const name = (user?.displayName || user?.email || 'Eu').split('@')[0].split(' ')[0];
+    write(store.set('people', newId(), { name, salary: 0, order: nextOrder(people), uid: user.uid }));
+    setToast({ text: `Você entrou na lista como “${name}”. Dá para trocar o nome em Pessoas.` });
   }
 
   function addPerson(name, salary) {
@@ -288,8 +335,10 @@ export default function ExtratoApp({ spacesApi }) {
   }
   function submitEntry(cardId, entry) {
     if (!entry.description.trim() || !entry.personId) return;
-    if (cardId) write(store.setMany('cardTransactions', buildEntries(entry, { cardId })));
-    else write(store.setMany('otherExpenses', buildEntries(entry, {})));
+    const visibleTo = visibleToFor(entry.hideFrom);
+    const extra = visibleTo ? { visibleTo } : {};
+    if (cardId) write(store.setMany('cardTransactions', buildEntries(entry, { cardId, ...extra })));
+    else write(store.setMany('otherExpenses', buildEntries(entry, extra)));
     setEntryForm(null);
     const entryMonth = entry.date.slice(0, 7);
     setToast(entryMonth === selectedMonth
@@ -359,6 +408,14 @@ export default function ExtratoApp({ spacesApi }) {
         ? { ...rest, cardId: target }
         : { ...rest, paidMonths: coll === 'otherExpenses' ? (paidMonths || []) : [] };
     };
+    // Quem pode ver: só muda se a edição trouxe `hideFrom`.
+    const newVisibleTo = patch.hideFrom ? visibleToFor(patch.hideFrom) : (item.visibleTo || null);
+    const sameSet = (a, b) => (a || []).length === (b || []).length && (a || []).every(u => (b || []).includes(u));
+    const visibilityChanged = !sameSet(newVisibleTo, item.visibleTo);
+    const withVisibility = x => {
+      const { visibleTo, coll: _c, ...rest } = x;
+      return newVisibleTo ? { ...rest, visibleTo: newVisibleTo } : rest;
+    };
     const targetName = target === 'outside' ? 'fora do cartão'
       : (c => (c ? (c.kind === 'payee' ? `Devo para ${c.name}` : `cartão ${c.name}`) : 'cartão'))(cards.find(c => c.id === target));
 
@@ -376,7 +433,7 @@ export default function ExtratoApp({ spacesApi }) {
         const changes = x.id === item.id ? clean : shared;
         const day = (x.id === item.id && clean.date !== item.date ? clean.date : dueDateIn(x, selectedMonth)).slice(8, 10);
         const next = {
-          ...reshape(x, changes), id: newId(), createdBy: user?.uid, date: `${selectedMonth}-${day}`, paid: false, endMonth: x.endMonth,
+          ...withVisibility(reshape(x, changes)), id: newId(), createdBy: user?.uid, date: `${selectedMonth}-${day}`, paid: false, endMonth: x.endMonth,
           ...(newSplitId ? { splitGroupId: newSplitId } : {}),
           ...(targetColl === 'otherExpenses' ? { paidMonths: (x.paidMonths || []).filter(m => m >= selectedMonth) } : {}),
         };
@@ -387,6 +444,16 @@ export default function ExtratoApp({ spacesApi }) {
       return;
     }
     const items = entriesInScope(entriesOf(coll), item, scope);
+    if (visibilityChanged) {
+      // Ocultar ou mostrar de novo: o lançamento muda de lugar (hiddenEntries).
+      for (const x of items) {
+        const changes = x.id === item.id ? clean : shared;
+        const next = withVisibility(moving ? reshape(x, changes) : { ...x, ...changes });
+        write(store.relocate(coll, targetColl, x, next, user?.uid));
+      }
+      setToast({ text: newVisibleTo ? `“${clean.description}”: ${visibilityLabel({ visibleTo: newVisibleTo }).toLowerCase()}.` : `“${clean.description}” voltou a aparecer para todos.` });
+      return;
+    }
     if (!moving) {
       for (const x of items) {
         if (x.id === item.id) write(store.update(coll, x, clean));
@@ -485,6 +552,8 @@ export default function ExtratoApp({ spacesApi }) {
     <div id="sec-people" data-nav="sec-people" style={{ scrollMarginTop: '1rem' }}>
       <PeopleSection
         people={people} onAdd={addPerson} onRemove={removePerson} onSalary={updateSalary} personColor={personColor} readOnly={readOnly}
+        meId={user?.uid} memberLabel={memberLabel} shared={(space?.members?.length || 0) > 1}
+        onLinkMe={!readOnly && !myPerson ? linkMeToPerson : null}
         entryCount={id => cardTransactions.filter(t => t.personId === id).length + otherExpenses.filter(t => t.personId === id).length}
         formOpen={peopleFormOpen} setFormOpen={setPeopleFormOpen}
       />
@@ -503,7 +572,7 @@ export default function ExtratoApp({ spacesApi }) {
               <label className="no-print label-sm">
                 <Users size={15} aria-hidden="true" />
                 <select value={spaceId} onChange={e => { setOpenPanel(null); spacesApi.setActiveSpace(e.target.value); }} aria-label="Espaço">
-                  {spaces.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  {spaces.map(s => <option key={s.id} value={s.id}>{spaceDisplayName(s, user?.uid)}</option>)}
                 </select>
               </label>
             ) : (
@@ -568,7 +637,8 @@ export default function ExtratoApp({ spacesApi }) {
           />
         )}
         {openPanel === 'space' && (
-          <SpacePanel spacesApi={spacesApi} userId={user?.uid} onClose={() => setOpenPanel(null)} />
+          <SpacePanel spacesApi={spacesApi} userId={user?.uid} onClose={() => setOpenPanel(null)}
+            onJoined={name => setToast({ text: `Você entrou em “${name}”.` })} />
         )}
         {openPanel === 'account' && (
           <AccountPanel spacesApi={spacesApi} data={data} spaceName={space?.name} onClose={() => setOpenPanel(null)}
@@ -593,6 +663,9 @@ export default function ExtratoApp({ spacesApi }) {
       </header>
 
       <main className="app-main" style={{ maxWidth: 1180, margin: '0 auto', padding: '0 1.5rem', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+        {!readOnly && !myPerson && people.length > 0 && (space?.members?.length || 0) > 1 && (
+          <WhoAreYou spaceId={spaceId} people={people} personColor={personColor} onPick={linkMeToPerson} onNew={addMeAsPerson} />
+        )}
         {showOnboarding && (
           <Onboarding
             hasPeople={people.length > 0} hasCards={cards.length > 0} hasEntries={hasEntries}
@@ -621,7 +694,7 @@ export default function ExtratoApp({ spacesApi }) {
               cards={cards} people={people} cardTransactions={cardTransactions}
               filterPerson={filterPerson} selectedMonth={selectedMonth} expandedCard={expandedCard} setExpandedCard={setExpandedCard}
               onAddCard={addCard} onRemoveCard={removeCard} onUpdateDueDay={updateCardDueDay} onUpdateColor={updateCardColor} onToggleInvoice={toggleInvoicePaid}
-              onNewEntry={openEntryForm} onRemoveTx={(t, scope) => removeEntry('cardTransactions', t, scope)} onUpdateTx={(t, patch, scope) => updateEntry('cardTransactions', t, patch, scope)} authorName={authorName}
+              onNewEntry={openEntryForm} onRemoveTx={(t, scope) => removeEntry('cardTransactions', t, scope)} onUpdateTx={(t, patch, scope) => updateEntry('cardTransactions', t, patch, scope)} authorName={authorName} members={otherMembers} visibilityLabel={visibilityLabel}
               personName={personName} personColor={personColor} cardGradients={pal.cardGradients} readOnly={readOnly}
               formOpen={cardFormOpen} setFormOpen={setCardFormOpen}
             />
@@ -632,7 +705,7 @@ export default function ExtratoApp({ spacesApi }) {
           <div id="sec-other" data-nav="sec-other" style={{ scrollMarginTop: '1rem' }}>
             <OtherExpensesSection
               expenses={otherExpenses} people={people} filterPerson={filterPerson} selectedMonth={selectedMonth}
-              cards={cards} onNewEntry={openEntryForm} onRemove={(e, scope) => removeEntry('otherExpenses', e, scope)} onUpdate={(e, patch, scope) => updateEntry('otherExpenses', e, patch, scope)} onTogglePaid={toggleOtherExpensePaid} authorName={authorName}
+              cards={cards} onNewEntry={openEntryForm} onRemove={(e, scope) => removeEntry('otherExpenses', e, scope)} onUpdate={(e, patch, scope) => updateEntry('otherExpenses', e, patch, scope)} onTogglePaid={toggleOtherExpensePaid} authorName={authorName} members={otherMembers} visibilityLabel={visibilityLabel}
               personName={personName} personColor={personColor} readOnly={readOnly}
             />
           </div>
@@ -684,7 +757,7 @@ export default function ExtratoApp({ spacesApi }) {
 
       {entryForm && (
         <EntryForm
-          people={people} cards={cards} selectedMonth={selectedMonth} initialTarget={entryForm.target}
+          people={people} cards={cards} selectedMonth={selectedMonth} initialTarget={entryForm.target} defaultPersonId={myPerson?.id} members={otherMembers}
           personColor={personColor} onSubmit={submitEntry} onClose={() => setEntryForm(null)}
         />
       )}

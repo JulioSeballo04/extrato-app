@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Pencil, Trash2, Check, ChevronDown } from 'lucide-react';
+import { Pencil, Trash2, Check, ChevronDown, EyeOff } from 'lucide-react';
 import { Dot, Tag, Sheet, MoneyInput } from '../ui';
 import { CATEGORIES, DEFAULT_CATEGORY, money, parseAmount, amountInput, fmtDate, isRecurring, defaultDateFor, dueDateIn, changeScopes, splitAmount } from '../../lib/ledger';
 
@@ -9,11 +9,11 @@ export const OUTSIDE_CARD = 'outside';
 
 // Formulário único de "Novo gasto": no cartão ou fora dele. O essencial fica à
 // vista; parcelas, divisão e "fixo" ficam em "Mais opções".
-export function EntryForm({ people, cards, selectedMonth, initialTarget, onSubmit, onClose, personColor }) {
+export function EntryForm({ people, cards, selectedMonth, initialTarget, onSubmit, onClose, personColor, defaultPersonId, members = [] }) {
   const [target, setTarget] = useState(initialTarget ?? (cards[0]?.id || OUTSIDE_CARD));
   const [amount, setAmount] = useState('');
   const [desc, setDesc] = useState('');
-  const [personId, setPersonId] = useState(people[0]?.id || '');
+  const [personId, setPersonId] = useState(defaultPersonId || people[0]?.id || '');
   const [date, setDate] = useState(defaultDateFor(selectedMonth));
   const [category, setCategory] = useState(DEFAULT_CATEGORY);
   const [fixed, setFixed] = useState(false);
@@ -21,6 +21,7 @@ export function EntryForm({ people, cards, selectedMonth, initialTarget, onSubmi
   const [paidInstallments, setPaidInstallments] = useState('0');
   const [splitWith, setSplitWith] = useState([]);
   const [showMore, setShowMore] = useState(false);
+  const [hideFrom, setHideFrom] = useState([]); // membros que não vão ver (ex.: presente)
   const [errors, setErrors] = useState({});
 
   const installmentsNum = Math.max(1, Math.floor(Number(installments)) || 1);
@@ -48,7 +49,7 @@ export function EntryForm({ people, cards, selectedMonth, initialTarget, onSubmi
     if (Object.keys(nextErrors).length) return;
     onSubmit(target === OUTSIDE_CARD ? null : target, {
       description: desc, amount: value, personId, date, category, fixed: installmentsNum === 1 && fixed,
-      installments: installmentsNum, paidInstallments: paidNum, splitWith: splitWith.filter(id => id !== personId),
+      installments: installmentsNum, paidInstallments: paidNum, splitWith: splitWith.filter(id => id !== personId), hideFrom,
     });
   }
 
@@ -103,7 +104,7 @@ export function EntryForm({ people, cards, selectedMonth, initialTarget, onSubmi
 
         <button type="button" className="ghost" onClick={() => setShowMore(s => !s)} aria-expanded={showMore} style={{ alignSelf: 'flex-start' }}>
           <ChevronDown size={14} style={{ transform: showMore ? 'rotate(180deg)' : 'none' }} />
-          Mais opções (parcelas, fixo, dividir)
+          Mais opções (parcelas, fixo, dividir{members.length > 0 ? ', esconder' : ''})
         </button>
 
         {showMore && (
@@ -123,6 +124,9 @@ export function EntryForm({ people, cards, selectedMonth, initialTarget, onSubmi
               <input type="checkbox" checked={fixed && installmentsNum === 1} disabled={installmentsNum > 1} onChange={e => setFixed(e.target.checked)} />
               Gasto fixo (repete todo mês, ex.: aluguel, assinatura)
             </label>
+            {members.length > 0 && (
+              <HideFromPicker members={members} hideFrom={hideFrom} setHideFrom={setHideFrom} />
+            )}
             {people.length > 1 && (
               <div className="field" role="group" aria-label="Dividir com">
                 Dividir igualmente com
@@ -168,7 +172,7 @@ export function PersonChip({ person, pressed, onClick, color }) {
 // `status(item)` devolve o selo de pagamento (ou null) daquela linha.
 // Ao editar ou apagar uma parcela, parte de compra dividida ou fixo, pergunta
 // a quem a mudança vale (ver changeScopes) antes de aplicar.
-export function EntryList({ items, people, cards = [], status, onUpdate, onRemove, personName, personColor, readOnly, emptyText, selectedMonth, authorName }) {
+export function EntryList({ items, people, cards = [], members = [], visibilityLabel, status, onUpdate, onRemove, personName, personColor, readOnly, emptyText, selectedMonth, authorName }) {
   const [editingId, setEditingId] = useState(null);
   const [asking, setAsking] = useState(null); // { item, action: 'edit' | 'delete', patch? }
 
@@ -196,7 +200,7 @@ export function EntryList({ items, people, cards = [], status, onUpdate, onRemov
     <div>
       {items.map(t => (
         editingId === t.id ? (
-          <EditRow key={t.id} item={t} people={people} cards={cards} onSave={patch => save(t, patch)} onCancel={() => setEditingId(null)} />
+          <EditRow key={t.id} item={t} people={people} cards={cards} members={members} onSave={patch => save(t, patch)} onCancel={() => setEditingId(null)} />
         ) : (
           <div key={t.id} className="row">
             <div className="row-line" style={{ flexWrap: 'nowrap', alignItems: 'baseline' }}>
@@ -213,6 +217,11 @@ export function EntryList({ items, people, cards = [], status, onUpdate, onRemov
               {isRecurring(t) && <Tag tone="accent">Fixo</Tag>}
               {t.installmentTotal > 1 && <Tag tone="info" mono title="Parcela">{t.installmentNumber}/{t.installmentTotal}</Tag>}
               {t.splitGroupId && <Tag title={`Dividido entre ${t.splitCount} pessoas`}>Dividido ÷{t.splitCount}</Tag>}
+              {visibilityLabel?.(t) && (
+                <span className="tag" title="Os membros listados não veem este lançamento" style={{ color: 'var(--accent-light)', border: '1px solid var(--accent)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <EyeOff size={11} aria-hidden="true" />{visibilityLabel(t)}
+                </span>
+              )}
               {authorName?.(t.createdBy) && <span className="hint" title="Quem lançou">por {authorName(t.createdBy)}</span>}
               <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
                 {status(t)}
@@ -256,11 +265,12 @@ function ScopeChooser({ asking, onChoose, onCancel }) {
 
 // Edição na linha: Enter salva, Esc cancela. Dá para mudar também a forma de
 // pagamento (outro cartão, pessoa a pagar ou fora do cartão) e a data.
-function EditRow({ item, people, cards, onSave, onCancel }) {
+function EditRow({ item, people, cards, members = [], onSave, onCancel }) {
   const [draft, setDraft] = useState({
     description: item.description, amount: amountInput(item.amount), personId: item.personId,
     date: item.date, fixed: !!item.fixed, category: item.category || DEFAULT_CATEGORY,
     target: item.cardId || OUTSIDE_CARD,
+    hideFrom: item.visibleTo?.length ? members.filter(m => !item.visibleTo.includes(m.uid)).map(m => m.uid) : [],
   });
   const [error, setError] = useState('');
   const set = patch => { setError(''); setDraft(d => ({ ...d, ...patch })); };
@@ -326,6 +336,11 @@ function EditRow({ item, people, cards, onSave, onCancel }) {
         </label>
       </div>
       <p className="hint" style={{ margin: '0.5rem 0 0' }}>{payHint}</p>
+      {members.length > 0 && (
+        <div style={{ marginTop: '0.6rem' }}>
+          <HideFromPicker members={members} hideFrom={draft.hideFrom} setHideFrom={fn => set({ hideFrom: typeof fn === 'function' ? fn(draft.hideFrom) : fn })} />
+        </div>
+      )}
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.6rem' }}>
         {!isInstallment && (
           <label className="label-sm" style={{ cursor: 'pointer' }}>
@@ -339,5 +354,28 @@ function EditRow({ item, people, cards, onSave, onCancel }) {
         <button type="submit" className="primary"><Check size={15} />Salvar</button>
       </div>
     </form>
+  );
+}
+
+// "Esconder de": membros do espaço que não vão ver o lançamento (ex.: o
+// presente da Sofia). Fica guardado à parte e as regras impedem a leitura.
+function HideFromPicker({ members, hideFrom, setHideFrom }) {
+  const toggle = uid => setHideFrom(prev => (prev.includes(uid) ? prev.filter(x => x !== uid) : [...prev, uid]));
+  return (
+    <div className="field" role="group" aria-label="Esconder de">
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><EyeOff size={13} aria-hidden="true" />Esconder de</span>
+      <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+        {members.map(m => (
+          <button key={m.uid} type="button" className="chip" aria-pressed={hideFrom.includes(m.uid)} onClick={() => toggle(m.uid)}>
+            {m.label}
+          </button>
+        ))}
+      </div>
+      {hideFrom.length > 0 && (
+        <span className="hint">
+          {members.filter(m => hideFrom.includes(m.uid)).map(m => m.label).join(', ')} não vai ver este lançamento — nem nos totais e na fatura.
+        </span>
+      )}
+    </div>
   );
 }

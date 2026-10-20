@@ -5,7 +5,7 @@ import { Plus, Trash2 } from 'lucide-react';
 import { Dot, MoneyInput } from '../ui';
 import { money, parseAmount, amountInput, entriesNote } from '../../lib/ledger';
 
-export default function PeopleSection({ people, onAdd, onRemove, onSalary, personColor, readOnly, entryCount, formOpen, setFormOpen }) {
+export default function PeopleSection({ people, onAdd, onRemove, onSalary, personColor, readOnly, entryCount, formOpen, setFormOpen, meId, memberLabel, shared, onLinkMe }) {
   const [name, setName] = useState('');
   const [salary, setSalary] = useState('');
   const [error, setError] = useState('');
@@ -41,7 +41,21 @@ export default function PeopleSection({ people, onAdd, onRemove, onSalary, perso
         {people.map(p => (
           <div key={p.id} className="row-line" style={{ gap: '0.75rem', padding: '0.4rem 0' }}>
             <Dot color={personColor(p.id)} size={10} />
-            <span style={{ flex: '1 1 110px', fontWeight: 500 }}>{p.name}</span>
+            <span style={{ flex: '1 1 110px', fontWeight: 500 }}>
+              {p.name}
+              {/* Conta ligada a esta pessoa (em espaço compartilhado) */}
+              {shared && p.uid && (
+                <span className="hint" style={{ marginLeft: 6, fontWeight: 400 }}>
+                  {p.uid === meId ? '(você)' : `· conta de ${memberLabel(p.uid)}`}
+                </span>
+              )}
+              {shared && !p.uid && onLinkMe && (
+                <button type="button" className="ghost" style={{ marginLeft: 8, minHeight: 0, padding: '0.1rem 0.5rem', fontSize: '0.72rem' }}
+                  onClick={() => onLinkMe(p.id)} title="Ligar esta pessoa à sua conta">
+                  Sou eu
+                </button>
+              )}
+            </span>
             {readOnly ? (
               <span className="mono" style={{ color: 'var(--text-dim)', fontSize: '0.85rem' }}>salário {money(p.salary)}</span>
             ) : (
