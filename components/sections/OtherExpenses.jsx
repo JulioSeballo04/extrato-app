@@ -6,7 +6,7 @@ import { StatusBadge } from '../ui';
 import { EntryList, OUTSIDE_CARD } from './Entries';
 import { money, monthLabel, matchesMonth, isRecurring, isPaidIn, dueDateIn, entryStatus, sumAmounts } from '../../lib/ledger';
 
-export default function OtherExpensesSection({ expenses, people, filterPerson, selectedMonth, onNewEntry, onRemove, onUpdate, onTogglePaid, personName, personColor, authorName, readOnly }) {
+export default function OtherExpensesSection({ expenses, people, cards, filterPerson, selectedMonth, onNewEntry, onRemove, onUpdate, onTogglePaid, personName, personColor, authorName, readOnly }) {
   const [onlyFixed, setOnlyFixed] = useState(false);
 
   const inMonth = expenses.filter(e => matchesMonth(e, selectedMonth) && (filterPerson === 'all' || e.personId === filterPerson));
@@ -33,7 +33,7 @@ export default function OtherExpensesSection({ expenses, people, filterPerson, s
       <p className="hint" style={{ marginBottom: '0.5rem' }}>Pix, boleto, dinheiro, débito: tudo que não entra na fatura de um cartão.</p>
 
       <EntryList
-        items={filtered} people={people} readOnly={readOnly}
+        items={filtered} people={people} cards={cards} readOnly={readOnly}
         status={e => (
           <StatusBadge status={entryStatus(isPaidIn(e, selectedMonth), dueDateIn(e, selectedMonth))} readOnly={readOnly}
             onToggle={() => onTogglePaid(e.id, selectedMonth)} />

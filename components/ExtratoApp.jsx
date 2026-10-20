@@ -347,6 +347,21 @@ export default function ExtratoApp({ spacesApi }) {
     const shared = Object.fromEntries(['description', 'category', 'amount']
       .filter(k => clean[k] !== item[k]).map(k => [k, clean[k]]));
 
+    // Forma de pagamento: um cartão (ou pessoa a pagar) pelo id, ou 'outside'.
+    const currentTarget = coll === 'cardTransactions' ? item.cardId : 'outside';
+    const target = patch.target || currentTarget;
+    const targetColl = target === 'outside' ? 'otherExpenses' : 'cardTransactions';
+    const moving = target !== currentTarget;
+    // O lançamento no formato da coleção de destino.
+    const reshape = (x, changes) => {
+      const { cardId, paidMonths, ...rest } = { ...x, ...changes };
+      return targetColl === 'cardTransactions'
+        ? { ...rest, cardId: target }
+        : { ...rest, paidMonths: coll === 'otherExpenses' ? (paidMonths || []) : [] };
+    };
+    const targetName = target === 'outside' ? 'fora do cartão'
+      : (c => (c ? (c.kind === 'payee' ? `Devo para ${c.name}` : `cartão ${c.name}`) : 'cartão'))(cards.find(c => c.id === target));
+
     if (scope === 'from') {
       // Fixo: as partes antigas valem até o mês anterior; daqui em diante, novas
       // partes com as mudanças (com um vínculo de divisão novo, só entre elas).
@@ -361,19 +376,32 @@ export default function ExtratoApp({ spacesApi }) {
         const changes = x.id === item.id ? clean : shared;
         const day = (x.id === item.id && clean.date !== item.date ? clean.date : dueDateIn(x, selectedMonth)).slice(8, 10);
         const next = {
-          ...x, ...changes, id: newId(), createdBy: user?.uid, date: `${selectedMonth}-${day}`, paid: false, endMonth: x.endMonth,
+          ...reshape(x, changes), id: newId(), createdBy: user?.uid, date: `${selectedMonth}-${day}`, paid: false, endMonth: x.endMonth,
           ...(newSplitId ? { splitGroupId: newSplitId } : {}),
-          ...(coll === 'otherExpenses' ? { paidMonths: (x.paidMonths || []).filter(m => m >= selectedMonth) } : {}),
+          ...(targetColl === 'otherExpenses' ? { paidMonths: (x.paidMonths || []).filter(m => m >= selectedMonth) } : {}),
         };
         write(store.update(coll, x, { endMonth }));
-        write(store.set(coll, next.id, next));
+        write(store.set(targetColl, next.id, next));
+      }
+      if (moving) setToast({ text: `A partir de ${monthLabel(selectedMonth)}, “${clean.description}” vai para ${targetName}.` });
+      return;
+    }
+    const items = entriesInScope(entriesOf(coll), item, scope);
+    if (!moving) {
+      for (const x of items) {
+        if (x.id === item.id) write(store.update(coll, x, clean));
+        else if (Object.keys(shared).length) write(store.update(coll, x, shared));
       }
       return;
     }
-    for (const x of entriesInScope(entriesOf(coll), item, scope)) {
-      if (x.id === item.id) write(store.update(coll, x, clean));
-      else if (Object.keys(shared).length) write(store.update(coll, x, shared));
+    if (targetColl === coll) {
+      // De um cartão para outro (ou para uma pessoa a pagar): só troca o cardId.
+      for (const x of items) write(store.update(coll, x, { ...(x.id === item.id ? clean : shared), cardId: target }));
+    } else {
+      // Entre cartão e "fora do cartão": muda de coleção, no mesmo lote.
+      write(store.move(coll, targetColl, items.map(x => ownAuthor(reshape(x, x.id === item.id ? clean : shared)))));
     }
+    setToast({ text: `“${clean.description}” agora é ${targetName}${items.length > 1 ? ` (${items.length} lançamentos)` : ''}.` });
   }
   // Gasto fixo: marca o mês em `paidMonths`; os demais têm um `paid` só.
   function toggleOtherExpensePaid(id, month) {
@@ -604,7 +632,7 @@ export default function ExtratoApp({ spacesApi }) {
           <div id="sec-other" data-nav="sec-other" style={{ scrollMarginTop: '1rem' }}>
             <OtherExpensesSection
               expenses={otherExpenses} people={people} filterPerson={filterPerson} selectedMonth={selectedMonth}
-              onNewEntry={openEntryForm} onRemove={(e, scope) => removeEntry('otherExpenses', e, scope)} onUpdate={(e, patch, scope) => updateEntry('otherExpenses', e, patch, scope)} onTogglePaid={toggleOtherExpensePaid} authorName={authorName}
+              cards={cards} onNewEntry={openEntryForm} onRemove={(e, scope) => removeEntry('otherExpenses', e, scope)} onUpdate={(e, patch, scope) => updateEntry('otherExpenses', e, patch, scope)} onTogglePaid={toggleOtherExpensePaid} authorName={authorName}
               personName={personName} personColor={personColor} readOnly={readOnly}
             />
           </div>

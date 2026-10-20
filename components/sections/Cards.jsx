@@ -190,7 +190,7 @@ export default function CardsSection({
 
       {activeCard && (
         <CardLedger
-          card={activeCard} people={people} selectedMonth={selectedMonth}
+          card={activeCard} cards={cards} people={people} selectedMonth={selectedMonth}
           monthTransactions={cardTransactions.filter(t => t.cardId === activeCard.id && matchesMonth(t, selectedMonth))}
           filterPerson={filterPerson}
           onNewEntry={onNewEntry} onRemoveTx={onRemoveTx} onUpdateTx={onUpdateTx} authorName={authorName}
@@ -285,7 +285,7 @@ function PayeeTile({ payee, owed, entryCount, selectedMonth, expanded, onToggle,
   );
 }
 
-function CardLedger({ card, people, monthTransactions, filterPerson, selectedMonth, onNewEntry, onRemoveTx, onUpdateTx, onUpdateDueDay, onUpdateColor, onToggleInvoice, personName, personColor, authorName, readOnly }) {
+function CardLedger({ card, cards, people, monthTransactions, filterPerson, selectedMonth, onNewEntry, onRemoveTx, onUpdateTx, onUpdateDueDay, onUpdateColor, onToggleInvoice, personName, personColor, authorName, readOnly }) {
   const ref = useRef(null);
   // Ao abrir um cartão, traz os lançamentos para a tela (no celular ficam lá embaixo).
   useEffect(() => {
@@ -365,7 +365,7 @@ function CardLedger({ card, people, monthTransactions, filterPerson, selectedMon
       )}
 
       <EntryList
-        items={sorted} people={people} readOnly={readOnly}
+        items={sorted} people={people} cards={cards} readOnly={readOnly}
         // Parcela no cartão: marca se aquela parcela já foi quitada (não vence sozinha; quem vence é a fatura).
         // A parcela no cartão segue a fatura do mês: paga quando a fatura foi paga
         // (ou quando foi lançada como "já paga"). Pessoa a pagar: o "pago" é do mês.

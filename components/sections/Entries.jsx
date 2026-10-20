@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Pencil, Trash2, Check, X, ChevronDown } from 'lucide-react';
+import { Pencil, Trash2, Check, ChevronDown } from 'lucide-react';
 import { Dot, Tag, Sheet, MoneyInput } from '../ui';
 import { CATEGORIES, DEFAULT_CATEGORY, money, parseAmount, amountInput, fmtDate, isRecurring, defaultDateFor, dueDateIn, changeScopes, splitAmount } from '../../lib/ledger';
 
@@ -168,7 +168,7 @@ export function PersonChip({ person, pressed, onClick, color }) {
 // `status(item)` devolve o selo de pagamento (ou null) daquela linha.
 // Ao editar ou apagar uma parcela, parte de compra dividida ou fixo, pergunta
 // a quem a mudança vale (ver changeScopes) antes de aplicar.
-export function EntryList({ items, people, status, onUpdate, onRemove, personName, personColor, readOnly, emptyText, selectedMonth, authorName }) {
+export function EntryList({ items, people, cards = [], status, onUpdate, onRemove, personName, personColor, readOnly, emptyText, selectedMonth, authorName }) {
   const [editingId, setEditingId] = useState(null);
   const [asking, setAsking] = useState(null); // { item, action: 'edit' | 'delete', patch? }
 
@@ -196,7 +196,7 @@ export function EntryList({ items, people, status, onUpdate, onRemove, personNam
     <div>
       {items.map(t => (
         editingId === t.id ? (
-          <EditRow key={t.id} item={t} people={people} onSave={patch => save(t, patch)} onCancel={() => setEditingId(null)} />
+          <EditRow key={t.id} item={t} people={people} cards={cards} onSave={patch => save(t, patch)} onCancel={() => setEditingId(null)} />
         ) : (
           <div key={t.id} className="row">
             <div className="row-line" style={{ flexWrap: 'nowrap', alignItems: 'baseline' }}>
@@ -254,48 +254,90 @@ function ScopeChooser({ asking, onChoose, onCancel }) {
   );
 }
 
-// Edição na linha: Enter salva, Esc cancela.
-function EditRow({ item, people, onSave, onCancel }) {
+// Edição na linha: Enter salva, Esc cancela. Dá para mudar também a forma de
+// pagamento (outro cartão, pessoa a pagar ou fora do cartão) e a data.
+function EditRow({ item, people, cards, onSave, onCancel }) {
   const [draft, setDraft] = useState({
     description: item.description, amount: amountInput(item.amount), personId: item.personId,
     date: item.date, fixed: !!item.fixed, category: item.category || DEFAULT_CATEGORY,
+    target: item.cardId || OUTSIDE_CARD,
   });
   const [error, setError] = useState('');
   const set = patch => { setError(''); setDraft(d => ({ ...d, ...patch })); };
   const isInstallment = item.installmentTotal > 1;
+  const targetCard = cards.find(c => c.id === draft.target);
+  const realCards = cards.filter(c => c.kind !== 'payee');
+  const payees = cards.filter(c => c.kind === 'payee');
 
   function submit(e) {
     e.preventDefault();
     const amount = parseAmount(draft.amount);
     if (!(amount > 0)) { setError('Informe um valor maior que zero.'); return; }
     if (!draft.description.trim()) { setError('A descrição não pode ficar vazia.'); return; }
+    if (!draft.date) { setError('Informe a data.'); return; }
     onSave({ ...draft, amount });
   }
+
+  // Quando é pago, conforme a forma de pagamento escolhida.
+  const payHint = !targetCard
+    ? (draft.fixed ? 'Fora do cartão: vence todo mês neste dia.' : 'Fora do cartão: vence nesta data.')
+    : targetCard.kind === 'payee'
+      ? (targetCard.dueDay ? `Pagar a ${targetCard.name} até o dia ${targetCard.dueDay} do mesmo mês.` : `Pagar a ${targetCard.name} no mesmo mês.`)
+      : (targetCard.dueDay ? `Entra na fatura do ${targetCard.name}, que vence dia ${targetCard.dueDay} do mês seguinte.` : `Entra na fatura do ${targetCard.name} (sem dia de vencimento cadastrado).`);
 
   return (
     <form
       onSubmit={submit}
       onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); onCancel(); } }}
-      style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', padding: '0.5rem', margin: '0.25rem 0', background: 'var(--panel-alt)', borderRadius: 10 }}
+      style={{ padding: '0.75rem', margin: '0.25rem 0', background: 'var(--panel-alt)', borderRadius: 10 }}
     >
-      <input type="date" value={draft.date} onChange={e => set({ date: e.target.value })} aria-label="Data" style={{ width: 150 }} />
-      <select value={draft.personId} onChange={e => set({ personId: e.target.value })} aria-label="Pessoa">
-        {people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-      </select>
-      <input value={draft.description} onChange={e => set({ description: e.target.value })} aria-label="Descrição" autoFocus style={{ flex: '1 1 140px' }} />
-      <select value={draft.category} onChange={e => set({ category: e.target.value })} aria-label="Categoria">
-        {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-      </select>
-      <MoneyInput value={draft.amount} onChange={v => set({ amount: v })} aria-label="Valor" aria-invalid={!!error} style={{ width: 130 }} />
-      {!isInstallment && (
-        <label className="label-sm" style={{ cursor: 'pointer' }}>
-          <input type="checkbox" checked={draft.fixed} onChange={e => set({ fixed: e.target.checked })} />
-          fixo
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '0.6rem' }}>
+        <label className="field" style={{ gridColumn: 'span 2' }}>
+          Descrição
+          <input value={draft.description} onChange={e => set({ description: e.target.value })} autoFocus maxLength={200} />
         </label>
-      )}
-      <button type="submit" className="icon" aria-label="Salvar" title="Salvar (Enter)" style={{ color: 'var(--success)' }}><Check size={18} /></button>
-      <button type="button" className="icon" onClick={onCancel} aria-label="Cancelar" title="Cancelar (Esc)"><X size={18} /></button>
-      {error && <span role="alert" style={{ color: 'var(--danger)', fontSize: '0.8rem', flexBasis: '100%' }}>{error}</span>}
+        <label className="field">
+          {isInstallment ? 'Valor da parcela' : 'Valor'}
+          <MoneyInput value={draft.amount} onChange={v => set({ amount: v })} aria-invalid={!!error} />
+        </label>
+        <label className="field">
+          Pagamento
+          <select value={draft.target} onChange={e => set({ target: e.target.value })}>
+            {realCards.map(c => <option key={c.id} value={c.id}>Cartão {c.name}</option>)}
+            {payees.map(c => <option key={c.id} value={c.id}>Devo para {c.name}</option>)}
+            <option value={OUTSIDE_CARD}>Fora do cartão (Pix, boleto…)</option>
+          </select>
+        </label>
+        <label className="field">
+          {!targetCard ? (draft.fixed ? 'Vence (a partir de)' : 'Vence em') : targetCard.kind === 'payee' ? 'Data' : 'Data da compra'}
+          <input type="date" value={draft.date} onChange={e => set({ date: e.target.value })} />
+        </label>
+        <label className="field">
+          Pessoa
+          <select value={draft.personId} onChange={e => set({ personId: e.target.value })}>
+            {people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </label>
+        <label className="field">
+          Categoria
+          <select value={draft.category} onChange={e => set({ category: e.target.value })}>
+            {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </label>
+      </div>
+      <p className="hint" style={{ margin: '0.5rem 0 0' }}>{payHint}</p>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.6rem' }}>
+        {!isInstallment && (
+          <label className="label-sm" style={{ cursor: 'pointer' }}>
+            <input type="checkbox" checked={draft.fixed} onChange={e => set({ fixed: e.target.checked })} />
+            fixo (repete todo mês)
+          </label>
+        )}
+        <span style={{ flex: 1 }} />
+        {error && <span role="alert" style={{ color: 'var(--danger)', fontSize: '0.8rem' }}>{error}</span>}
+        <button type="button" className="ghost" onClick={onCancel}>Cancelar</button>
+        <button type="submit" className="primary"><Check size={15} />Salvar</button>
+      </div>
     </form>
   );
 }
