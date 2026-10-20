@@ -13,6 +13,7 @@ import {
 } from '../lib/ledger';
 import { APP_CSS } from './appStyles';
 import { Toast } from './ui';
+import { useInstallUi } from './InstallPrompt';
 import SpacePanel from './SpacePanel';
 import AccountPanel from './AccountPanel';
 import CustomizePanel, { DEFAULT_VISIBLE } from './CustomizePanel';
@@ -56,6 +57,7 @@ export default function ExtratoApp({ spacesApi }) {
   const [cardFormOpen, setCardFormOpen] = useState(false);
   const [systemDark, setSystemDark] = useState(true);
   const [activeNav, setActiveNav] = useState('top');
+  const installUi = useInstallUi(); // aviso de instalar o app + setinha no topo
   const { people, cards, cardTransactions, otherExpenses } = data;
   // Ocultos (ex.: presente): o store manda cada um para hiddenEntries sozinho.
   const hiddenIds = new Set([...cardTransactions, ...otherExpenses].filter(x => x.visibleTo?.length).map(x => x.id));
@@ -282,17 +284,23 @@ export default function ExtratoApp({ spacesApi }) {
     if (p) write(store.update('people', p, { salary }));
   }
   // kind 'payee' = pessoa a quem se deve (ex.: a mãe); sem kind, é cartão.
-  function addCard(name, limitValue, color, dueDay, kind) {
+  function addCard(name, limitValue, color, dueDay, kind, closeDay) {
     if (!name.trim()) return;
-    write(store.set('cards', newId(), { name, limitValue, color, dueDay: parseDueDay(dueDay), paidInvoices: [], order: nextOrder(cards), ...(kind === 'payee' ? { kind } : {}) }));
+    write(store.set('cards', newId(), {
+      name, limitValue, color, dueDay: parseDueDay(dueDay), closeDay: parseDueDay(closeDay), paidInvoices: [], order: nextOrder(cards),
+      ...(kind === 'payee' ? { kind } : {}),
+    }));
   }
-  function updateCardColor(id, color) {
+  // Editar cartão: nome, limite, cor, vencimento e fechamento da fatura.
+  function updateCard(id, patch) {
     const c = cards.find(x => x.id === id);
-    if (c) write(store.update('cards', c, { color }));
-  }
-  function updateCardDueDay(id, dueDay) {
-    const c = cards.find(x => x.id === id);
-    if (c) write(store.update('cards', c, { dueDay: parseDueDay(dueDay) }));
+    if (!c) return;
+    const clean = { ...patch };
+    if ('dueDay' in clean) clean.dueDay = parseDueDay(clean.dueDay);
+    if ('closeDay' in clean) clean.closeDay = parseDueDay(clean.closeDay);
+    if ('name' in clean) clean.name = clean.name.trim() || c.name;
+    write(store.update('cards', c, clean));
+    setToast({ text: `${c.kind === 'payee' ? '' : 'Cartão '}“${clean.name || c.name}” atualizado.` });
   }
   function removeCard(id) {
     write(store.removeMany([
@@ -580,6 +588,7 @@ export default function ExtratoApp({ spacesApi }) {
             )}
           </div>
           <nav className="no-print header-actions" aria-label="Opções">
+            {installUi.button}
             <button className={`ghost${openPanel === 'space' ? ' active' : ''}`} onClick={() => togglePanel('space')} aria-expanded={openPanel === 'space'}
               aria-label={spaces.length > 1 ? 'Espaços' : 'Compartilhar'} title={spaces.length > 1 ? 'Espaços' : 'Compartilhar'}>
               <Link2 size={15} /><span className="btn-label">{spaces.length > 1 ? 'Espaços' : 'Compartilhar'}</span>
@@ -641,7 +650,7 @@ export default function ExtratoApp({ spacesApi }) {
             onJoined={name => setToast({ text: `Você entrou em “${name}”.` })} />
         )}
         {openPanel === 'account' && (
-          <AccountPanel spacesApi={spacesApi} data={data} spaceName={space?.name} onClose={() => setOpenPanel(null)}
+          <AccountPanel spacesApi={spacesApi} data={data} spaceName={space?.name} onClose={() => setOpenPanel(null)} visibilityLabel={visibilityLabel}
             onLogout={logout} onClearAll={readOnly ? null : clearAll} />
         )}
         {openPanel === 'customize' && (
@@ -663,6 +672,7 @@ export default function ExtratoApp({ spacesApi }) {
       </header>
 
       <main className="app-main" style={{ maxWidth: 1180, margin: '0 auto', padding: '0 1.5rem', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+        {installUi.banner}
         {!readOnly && !myPerson && people.length > 0 && (space?.members?.length || 0) > 1 && (
           <WhoAreYou spaceId={spaceId} people={people} personColor={personColor} onPick={linkMeToPerson} onNew={addMeAsPerson} />
         )}
@@ -693,7 +703,7 @@ export default function ExtratoApp({ spacesApi }) {
             <CardsSection
               cards={cards} people={people} cardTransactions={cardTransactions}
               filterPerson={filterPerson} selectedMonth={selectedMonth} expandedCard={expandedCard} setExpandedCard={setExpandedCard}
-              onAddCard={addCard} onRemoveCard={removeCard} onUpdateDueDay={updateCardDueDay} onUpdateColor={updateCardColor} onToggleInvoice={toggleInvoicePaid}
+              onAddCard={addCard} onRemoveCard={removeCard} onUpdateCard={updateCard} onToggleInvoice={toggleInvoicePaid}
               onNewEntry={openEntryForm} onRemoveTx={(t, scope) => removeEntry('cardTransactions', t, scope)} onUpdateTx={(t, patch, scope) => updateEntry('cardTransactions', t, patch, scope)} authorName={authorName} members={otherMembers} visibilityLabel={visibilityLabel}
               personName={personName} personColor={personColor} cardGradients={pal.cardGradients} readOnly={readOnly}
               formOpen={cardFormOpen} setFormOpen={setCardFormOpen}
@@ -761,6 +771,7 @@ export default function ExtratoApp({ spacesApi }) {
           personColor={personColor} onSubmit={submitEntry} onClose={() => setEntryForm(null)}
         />
       )}
+      {installUi.iosHelp}
       <Toast toast={toast} onClose={() => setToast(null)} />
     </div>
   );

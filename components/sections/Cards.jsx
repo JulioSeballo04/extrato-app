@@ -1,21 +1,22 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Plus, Trash2, ChevronDown, ChevronUp, Check, HandCoins } from 'lucide-react';
+import { Plus, Trash2, ChevronDown, ChevronUp, Check, HandCoins, Pencil } from 'lucide-react';
 import { Dot, StatusBadge, MoneyInput } from '../ui';
 import { EntryList } from './Entries';
 import { CARD_COLORS, cardColorKey } from '../../lib/theme';
-import { money, parseAmount, monthLabel, matchesMonth, isRecurring, invoiceInfo, entriesNote, sumAmounts, isPayee, capitalize, cardLimitUsage } from '../../lib/ledger';
+import { money, parseAmount, amountInput, monthLabel, matchesMonth, isRecurring, invoiceInfo, entriesNote, sumAmounts, isPayee, capitalize, cardLimitUsage, entryInInvoice, invoiceCloseDate, fmtDate } from '../../lib/ledger';
 
 export default function CardsSection({
   cards, people, cardTransactions, filterPerson, selectedMonth, expandedCard, setExpandedCard,
-  onAddCard, onRemoveCard, onUpdateDueDay, onUpdateColor, onToggleInvoice, onNewEntry, onRemoveTx, onUpdateTx,
+  onAddCard, onRemoveCard, onUpdateCard, onToggleInvoice, onNewEntry, onRemoveTx, onUpdateTx,
   personName, personColor, authorName, members, visibilityLabel, cardGradients, readOnly, formOpen, setFormOpen,
 }) {
   const [name, setName] = useState('');
   const [limitValue, setLimitValue] = useState('');
   const [color, setColor] = useState('');
   const [dueDay, setDueDay] = useState('');
+  const [closeDay, setCloseDay] = useState('');
   const [error, setError] = useState('');
   const [confirmCardId, setConfirmCardId] = useState(null);
   const [payeeFormOpen, setPayeeFormOpen] = useState(false);
@@ -23,8 +24,8 @@ export default function CardsSection({
   function submit(e) {
     e.preventDefault();
     if (!name.trim()) { setError('Dê um nome ao cartão (ex.: Roxinho).'); return; }
-    onAddCard(name.trim(), parseAmount(limitValue), color, dueDay);
-    setName(''); setLimitValue(''); setColor(''); setDueDay(''); setError(''); setFormOpen(false);
+    onAddCard(name.trim(), parseAmount(limitValue), color, dueDay, undefined, closeDay);
+    setName(''); setLimitValue(''); setColor(''); setDueDay(''); setCloseDay(''); setError(''); setFormOpen(false);
   }
 
   const activeCard = cards.find(c => c.id === expandedCard);
@@ -83,10 +84,17 @@ export default function CardsSection({
             <MoneyInput value={limitValue} onChange={setLimitValue} />
           </label>
           <label className="field" style={{ flex: '0 1 110px' }}>
+            Fecha dia
+            <input placeholder="opcional" type="number" inputMode="numeric" min="1" max="31" value={closeDay} onChange={e => setCloseDay(e.target.value)} />
+          </label>
+          <label className="field" style={{ flex: '0 1 110px' }}>
             Vence dia
             <input placeholder="1 a 31" type="number" inputMode="numeric" min="1" max="31" value={dueDay} onChange={e => setDueDay(e.target.value)} />
           </label>
           <button type="submit" className="primary">Adicionar</button>
+          <p className="hint" style={{ flexBasis: '100%', margin: 0 }}>
+            Com o dia de fechamento, compras feitas a partir dele entram na fatura seguinte, como no banco.
+          </p>
           {error && <span style={{ color: 'var(--danger)', fontSize: '0.8rem', flexBasis: '100%' }}>{error}</span>}
         </form>
       )}
@@ -101,7 +109,8 @@ export default function CardsSection({
           {realCards.map((c, i) => {
             const colorInfo = CARD_COLORS[cardColorKey(c)];
             const [ca, cb] = colorInfo ? colorInfo.gradient : cardGradients[i % cardGradients.length];
-            const used = sumAmounts(cardTransactions.filter(t => t.cardId === c.id && matchesMonth(t, selectedMonth)));
+            // Fatura do mês escolhido (respeita o dia de fechamento, se houver).
+            const used = sumAmounts(cardTransactions.filter(t => entryInInvoice(c, t, selectedMonth)));
             // Limite como no banco: parcelas futuras ocupam, fatura paga libera (sempre "hoje").
             const limit = cardLimitUsage(c, cardTransactions);
             const due = invoiceInfo(c, selectedMonth, used);
@@ -198,11 +207,11 @@ export default function CardsSection({
       {activeCard && (
         <CardLedger
           card={activeCard} cards={cards} allTransactions={cardTransactions} people={people} selectedMonth={selectedMonth}
-          monthTransactions={cardTransactions.filter(t => t.cardId === activeCard.id && matchesMonth(t, selectedMonth))}
+          monthTransactions={cardTransactions.filter(t => entryInInvoice(activeCard, t, selectedMonth))}
           filterPerson={filterPerson}
           onNewEntry={onNewEntry} onRemoveTx={onRemoveTx} onUpdateTx={onUpdateTx} authorName={authorName}
           members={members} visibilityLabel={visibilityLabel}
-          onUpdateDueDay={onUpdateDueDay} onUpdateColor={onUpdateColor} onToggleInvoice={onToggleInvoice}
+          onUpdateCard={onUpdateCard} onToggleInvoice={onToggleInvoice}
           personName={personName} personColor={personColor} readOnly={readOnly}
         />
       )}
@@ -293,7 +302,7 @@ function PayeeTile({ payee, owed, entryCount, selectedMonth, expanded, onToggle,
   );
 }
 
-function CardLedger({ card, cards, allTransactions, people, monthTransactions, filterPerson, selectedMonth, onNewEntry, onRemoveTx, onUpdateTx, onUpdateDueDay, onUpdateColor, onToggleInvoice, personName, personColor, authorName, members, visibilityLabel, readOnly }) {
+function CardLedger({ card, cards, allTransactions, people, monthTransactions, filterPerson, selectedMonth, onNewEntry, onRemoveTx, onUpdateTx, onUpdateCard, onToggleInvoice, personName, personColor, authorName, members, visibilityLabel, readOnly }) {
   const ref = useRef(null);
   // Ao abrir um cartão, traz os lançamentos para a tela (no celular ficam lá embaixo).
   useEffect(() => {
@@ -311,6 +320,9 @@ function CardLedger({ card, cards, allTransactions, people, monthTransactions, f
   const invoiceTotal = sumAmounts(monthTransactions);
   const month = monthLabel(selectedMonth).split(' ')[0];
   const limit = !payee && card.limitValue > 0 ? cardLimitUsage(card, allTransactions || []) : null;
+  const closeDate = payee ? null : invoiceCloseDate(card, selectedMonth);
+  const [editing, setEditing] = useState(false);
+  useEffect(() => { setEditing(false); }, [card.id]);
   const due = invoiceInfo(card, selectedMonth, invoiceTotal);
   const dueColor = due?.paid ? 'var(--success)' : due?.urgent ? 'var(--danger)' : 'var(--text-muted)';
 
@@ -329,13 +341,17 @@ function CardLedger({ card, cards, allTransactions, people, monthTransactions, f
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem 1.1rem', flexWrap: 'wrap', marginBottom: '0.9rem', fontSize: '0.8rem' }}>
-        {readOnly ? (
-          card.dueDay ? <span style={{ color: 'var(--text-dim)' }}>{payee ? 'Pagar até o dia' : 'Fatura vence dia'} {card.dueDay}</span> : null
-        ) : (
-          <label className="label-sm" title={payee ? 'O que você deve num mês é pago até este dia do mesmo mês' : 'As compras de um mês vencem neste dia do mês seguinte'}>
-            {payee ? 'Pagar até o dia' : 'Fatura vence dia'}
-            <input type="number" inputMode="numeric" min="1" max="31" placeholder="—" value={card.dueDay || ''} onChange={e => onUpdateDueDay(card.id, e.target.value)} style={{ width: 70 }} />
-          </label>
+        <span style={{ color: 'var(--text-dim)' }}>
+          {payee
+            ? (card.dueDay ? `Pagar até o dia ${card.dueDay}` : 'Sem dia combinado')
+            : [card.closeDay ? `Fecha dia ${card.closeDay}` : null, card.dueDay ? `vence dia ${card.dueDay}` : 'sem dia de vencimento']
+              .filter(Boolean).join(' · ')}
+          {closeDate && !due?.paid && <> · esta fatura fecha {fmtDate(closeDate)}</>}
+        </span>
+        {!readOnly && (
+          <button className={`ghost${editing ? ' active' : ''}`} onClick={() => setEditing(e => !e)} aria-expanded={editing}>
+            <Pencil size={13} />{payee ? 'Editar' : 'Editar cartão'}
+          </button>
         )}
         {due && (
           <span style={{ color: dueColor, fontWeight: 600 }}>
@@ -352,15 +368,7 @@ function CardLedger({ card, cards, allTransactions, people, monthTransactions, f
               : (due?.paid ? 'Fatura paga' : 'Marcar fatura como paga')}
           </button>
         )}
-        {!readOnly && !payee && (
-          <label className="label-sm">
-            Cor
-            <select value={cardColorKey(card)} onChange={e => onUpdateColor(card.id, e.target.value || 'auto')} aria-label="Cor do cartão">
-              <option value="">Automática</option>
-              {Object.entries(CARD_COLORS).map(([key, c]) => <option key={key} value={key}>{c.label}</option>)}
-            </select>
-          </label>
-        )}
+
         {spentByPerson.map(({ person, total }) => (
           <span key={person.id} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', color: 'var(--text-dim)' }}>
             <Dot color={personColor(person.id)} />
@@ -369,6 +377,10 @@ function CardLedger({ card, cards, allTransactions, people, monthTransactions, f
         ))}
       </div>
 
+      {editing && !readOnly && (
+        <CardEditForm card={card} payee={payee} onCancel={() => setEditing(false)}
+          onSave={patch => { onUpdateCard(card.id, patch); setEditing(false); }} />
+      )}
       {limit && (
         <p className="hint" style={{ margin: '-0.4rem 0 0.9rem', color: limit.over ? 'var(--danger)' : undefined }}>
           Limite usado hoje: <strong className="mono">{money(limit.used)}</strong> de {money(card.limitValue)}
@@ -397,5 +409,72 @@ function CardLedger({ card, cards, allTransactions, people, monthTransactions, f
           : filterPerson === 'all' ? `Nenhum lançamento neste cartão em ${monthLabel(selectedMonth)}.` : 'Nenhum lançamento dessa pessoa neste cartão no mês.'}
       />
     </div>
+  );
+}
+
+// Editar cartão (ou pessoa a pagar): nome, limite, cor, fechamento e vencimento.
+function CardEditForm({ card, payee, onSave, onCancel }) {
+  const [name, setName] = useState(card.name);
+  const [limitValue, setLimitValue] = useState(amountInput(card.limitValue));
+  const [color, setColor] = useState(cardColorKey(card));
+  const [dueDay, setDueDay] = useState(card.dueDay ? String(card.dueDay) : '');
+  const [closeDay, setCloseDay] = useState(card.closeDay ? String(card.closeDay) : '');
+  const [error, setError] = useState('');
+
+  function submit(e) {
+    e.preventDefault();
+    if (!name.trim()) { setError('O nome não pode ficar vazio.'); return; }
+    const day = v => (v === '' ? 0 : Number(v));
+    if ([dueDay, closeDay].some(v => v !== '' && !(day(v) >= 1 && day(v) <= 31))) { setError('Os dias vão de 1 a 31.'); return; }
+    onSave(payee
+      ? { name, dueDay }
+      : { name, limitValue: parseAmount(limitValue), color: color || 'auto', dueDay, closeDay });
+  }
+
+  return (
+    <form onSubmit={submit} onKeyDown={e => { if (e.key === 'Escape') onCancel(); }}
+      style={{ padding: '0.75rem', marginBottom: '0.9rem', background: 'var(--panel-alt)', borderRadius: 10 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.6rem' }}>
+        <label className="field">
+          Nome
+          <input value={name} onChange={e => { setName(e.target.value); setError(''); }} maxLength={60} autoFocus />
+        </label>
+        {!payee && (
+          <label className="field">
+            Limite
+            <MoneyInput value={limitValue} onChange={setLimitValue} />
+          </label>
+        )}
+        {!payee && (
+          <label className="field">
+            Fecha dia
+            <input type="number" inputMode="numeric" min="1" max="31" placeholder="opcional" value={closeDay} onChange={e => { setCloseDay(e.target.value); setError(''); }} />
+          </label>
+        )}
+        <label className="field">
+          {payee ? 'Pagar até o dia' : 'Vence dia'}
+          <input type="number" inputMode="numeric" min="1" max="31" placeholder={payee ? 'opcional' : '1 a 31'} value={dueDay} onChange={e => { setDueDay(e.target.value); setError(''); }} />
+        </label>
+        {!payee && (
+          <label className="field">
+            Cor
+            <select value={color} onChange={e => setColor(e.target.value)}>
+              <option value="">Automática</option>
+              {Object.entries(CARD_COLORS).map(([key, c]) => <option key={key} value={key}>{c.label}</option>)}
+            </select>
+          </label>
+        )}
+      </div>
+      {!payee && (
+        <p className="hint" style={{ margin: '0.5rem 0 0' }}>
+          Compras feitas a partir do dia de fechamento entram na fatura seguinte. Sem fechamento, cada fatura junta as compras do mês.
+        </p>
+      )}
+      <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', alignItems: 'center', marginTop: '0.6rem', flexWrap: 'wrap' }}>
+        {error && <span role="alert" style={{ color: 'var(--danger)', fontSize: '0.8rem', marginRight: 'auto' }}>{error}</span>}
+        <button type="button" className="ghost" onClick={onCancel}>Cancelar</button>
+        <button type="submit" className="primary"><Check size={15} />Salvar</button>
+      </div>
+    </form>
   );
 }

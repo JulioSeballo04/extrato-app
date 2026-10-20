@@ -117,7 +117,9 @@ service cloud.firestore {
 
       function validCard(d) {
         // `kind: 'payee'` = pessoa a quem se deve (ex.: a mãe); sem o campo, é um cartão.
-        return d.keys().hasOnly(['name', 'limitValue', 'color', 'bank', 'dueDay', 'paidInvoices', 'order', 'kind'])
+        // `closeDay`: dia em que a fatura fecha (0 = não informado).
+        return d.keys().hasOnly(['name', 'limitValue', 'color', 'bank', 'dueDay', 'closeDay', 'paidInvoices', 'order', 'kind'])
+          && (!('closeDay' in d) || (d.closeDay is int && d.closeDay >= 0 && d.closeDay <= 31))
           && (!('kind' in d) || d.kind == 'payee')
           && d.name is string && d.name.size() >= 1 && d.name.size() <= 60
           && d.limitValue is number && d.limitValue >= 0

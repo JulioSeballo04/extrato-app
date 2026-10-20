@@ -68,7 +68,7 @@ export default function PrivacidadePage() {
       <ul>
         <li>confirmar se tratamos seus dados e acessá-los;</li>
         <li>corrigir dados incompletos ou desatualizados (a maior parte você edita no próprio app);</li>
-        <li>pedir a portabilidade — em <em>Conta → Baixar seus dados</em> você baixa tudo em JSON ou planilha;</li>
+        <li>pedir a portabilidade — em <em>Conta → Baixar seus dados</em> você baixa a planilha dos lançamentos de cada espaço; para receber todos os seus dados de uma vez, escreva para {email};</li>
         <li>pedir a eliminação — em <em>Conta → Excluir minha conta</em>;</li>
         <li>saber com quem compartilhamos seus dados e revogar consentimentos, quando aplicável;</li>
         <li>reclamar à Autoridade Nacional de Proteção de Dados (ANPD).</li>

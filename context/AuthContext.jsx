@@ -18,6 +18,8 @@ import {
   deleteUser,
 } from 'firebase/auth';
 import { auth, clearLocalDataAndReload } from '../lib/firebase';
+// Começa a escutar o "instalar app" do navegador o quanto antes.
+import '../lib/install';
 
 const AuthContext = createContext(null);
 

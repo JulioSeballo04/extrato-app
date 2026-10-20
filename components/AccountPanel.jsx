@@ -5,57 +5,7 @@ import Link from 'next/link';
 import { Download, LogOut } from 'lucide-react';
 import { PanelHeader } from './ui';
 import { useAuth } from '../context/AuthContext';
-import { exportUserData, accountDeletionPlan, deleteUserData } from '../lib/spaces';
-import { todayStr } from '../lib/ledger';
-
-function download(filename, content, type) {
-  const url = URL.createObjectURL(new Blob([content], { type }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-// Data local (toISOString seria UTC: depois das 21h já seria o dia seguinte).
-function today() {
-  return todayStr();
-}
-
-// Planilha dos lançamentos do espaço atual. Ponto e vírgula e vírgula decimal
-// (padrão do Excel em português); o BOM faz o Excel ler os acentos certo.
-function entriesCsv({ people, cards, cardTransactions, otherExpenses }) {
-  const personName = id => people.find(p => p.id === id)?.name || '';
-  const cardName = id => cards.find(c => c.id === id)?.name || '';
-  const cell = v => {
-    const s = String(v ?? '');
-    return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  };
-  const amount = v => (Number(v) || 0).toFixed(2).replace('.', ',');
-  const rows = [
-    ...cardTransactions.map(t => ({
-      ...t, cartao: cardName(t.cardId),
-      tipo: cards.find(c => c.id === t.cardId)?.kind === 'payee' ? 'Devo a pessoa' : 'Cartão',
-    })),
-    ...otherExpenses.map(t => ({ ...t, tipo: 'Outro gasto', cartao: '' })),
-  ].sort((a, b) => (a.date < b.date ? -1 : 1));
-  // Pago: no cartão, a fatura daquele mês (ou a parcela lançada como já paga);
-  // num fixo, os meses pagos; nos demais, o próprio lançamento.
-  const paidText = t => {
-    const card = t.cardId && cards.find(c => c.id === t.cardId);
-    if (card) return t.paid || (card.paidInvoices || []).includes(t.date.slice(0, 7)) ? 'sim' : '';
-    if (t.fixed && !(t.installmentTotal > 1)) return (t.paidMonths || []).length ? `meses: ${t.paidMonths.join(', ')}` : '';
-    return t.paid ? 'sim' : '';
-  };
-  const header = ['Data', 'Tipo', 'Cartão', 'Descrição', 'Categoria', 'Pessoa', 'Valor', 'Parcela', 'Fixo', 'Encerrado em', 'Pago'];
-  const lines = rows.map(t => [
-    t.date, t.tipo, t.cartao, t.description, t.category, personName(t.personId), amount(t.amount),
-    t.installmentTotal > 1 ? `${t.installmentNumber}/${t.installmentTotal}` : '', t.fixed ? 'sim' : '', t.endMonth || '', paidText(t),
-  ].map(cell).join(';'));
-  return '﻿' + [header.join(';'), ...lines].join('\r\n');
-}
+import { accountDeletionPlan, deleteUserData } from '../lib/spaces';
 
 const DELETE_ERRORS = {
   'auth/wrong-password': 'Senha incorreta.',
@@ -66,7 +16,7 @@ const DELETE_ERRORS = {
   'auth/too-many-requests': 'Muitas tentativas. Aguarde um pouco e tente de novo.',
 };
 
-export default function AccountPanel({ spacesApi, data, spaceName, onClose, onLogout, onClearAll }) {
+export default function AccountPanel({ spacesApi, data, spaceName, onClose, onLogout, onClearAll, visibilityLabel }) {
   const { user, signInMethod, reauthenticate, deleteAccount } = useAuth();
   const { spaces } = spacesApi;
   const [busy, setBusy] = useState(false);
@@ -78,21 +28,18 @@ export default function AccountPanel({ spacesApi, data, spaceName, onClose, onLo
   const method = signInMethod();
   const plan = accountDeletionPlan(user.uid, spaces);
 
-  async function handleExport() {
+  // Planilha Excel organizada em abas (a biblioteca só carrega agora).
+  async function handleXlsx() {
     setBusy(true); setMessage(null);
     try {
-      const out = await exportUserData(user, spaces);
-      download(`meus-dados-${today()}.json`, JSON.stringify(out, null, 2), 'application/json');
-      setMessage({ type: 'ok', text: 'Arquivo com todos os seus dados baixado.' });
+      const { downloadSpaceWorkbook } = await import('../lib/exportXlsx');
+      await downloadSpaceWorkbook(data, spaceName, visibilityLabel);
+      setMessage({ type: 'ok', text: 'Planilha baixada.' });
     } catch {
-      setMessage({ type: 'error', text: 'Não foi possível exportar agora. Tente de novo.' });
+      setMessage({ type: 'error', text: 'Não foi possível gerar a planilha agora. Tente de novo.' });
     } finally {
       setBusy(false);
     }
-  }
-
-  function handleCsv() {
-    download(`lancamentos-${today()}.csv`, entriesCsv(data), 'text/csv;charset=utf-8');
   }
 
   async function handleDelete(e) {
@@ -132,14 +79,11 @@ export default function AccountPanel({ spacesApi, data, spaceName, onClose, onLo
         <div>
           <div style={label}>Baixar seus dados</div>
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-            <button className="ghost" onClick={handleCsv}>
-              <Download size={14} style={{ marginRight: 4, verticalAlign: -2 }} />Planilha de “{spaceName}”
-            </button>
-            <button className="ghost" onClick={handleExport} disabled={busy}>
-              <Download size={14} style={{ marginRight: 4, verticalAlign: -2 }} />Tudo (JSON)
+            <button className="ghost" onClick={handleXlsx} disabled={busy}>
+              <Download size={14} style={{ marginRight: 4, verticalAlign: -2 }} />{busy ? 'Gerando…' : `Planilha Excel de “${spaceName}”`}
             </button>
           </div>
-          <p style={hint}>A planilha abre no Excel/Google Planilhas. O JSON traz todos os espaços e preferências.</p>
+          <p style={hint}>Abas: Lançamentos, Resumo por mês, Por categoria e Cartões. Abre no Excel e no Google Planilhas. Para receber todos os seus dados, peça pelo e-mail que está na Política de privacidade.</p>
         </div>
 
         <div>
