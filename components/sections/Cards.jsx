@@ -5,7 +5,7 @@ import { Plus, Trash2, ChevronDown, ChevronUp, Check, HandCoins } from 'lucide-r
 import { Dot, StatusBadge, MoneyInput } from '../ui';
 import { EntryList } from './Entries';
 import { CARD_COLORS, cardColorKey } from '../../lib/theme';
-import { money, parseAmount, monthLabel, matchesMonth, isRecurring, invoiceInfo, entriesNote, sumAmounts, isPayee, capitalize } from '../../lib/ledger';
+import { money, parseAmount, monthLabel, matchesMonth, isRecurring, invoiceInfo, entriesNote, sumAmounts, isPayee, capitalize, cardLimitUsage } from '../../lib/ledger';
 
 export default function CardsSection({
   cards, people, cardTransactions, filterPerson, selectedMonth, expandedCard, setExpandedCard,
@@ -102,12 +102,13 @@ export default function CardsSection({
             const colorInfo = CARD_COLORS[cardColorKey(c)];
             const [ca, cb] = colorInfo ? colorInfo.gradient : cardGradients[i % cardGradients.length];
             const used = sumAmounts(cardTransactions.filter(t => t.cardId === c.id && matchesMonth(t, selectedMonth)));
-            const pct = c.limitValue > 0 ? Math.min(100, (used / c.limitValue) * 100) : 0;
+            // Limite como no banco: parcelas futuras ocupam, fatura paga libera (sempre "hoje").
+            const limit = cardLimitUsage(c, cardTransactions);
             const due = invoiceInfo(c, selectedMonth, used);
             const expanded = expandedCard === c.id;
             return (
               <div key={c.id} className="credit-card" role="button" tabIndex={0} aria-expanded={expanded}
-                aria-label={`Cartão ${c.name}, ${money(used)} usados em ${monthLabel(selectedMonth)}. ${expanded ? 'Fechar' : 'Ver'} lançamentos`}
+                aria-label={`Cartão ${c.name}: fatura de ${monthLabel(selectedMonth)} ${money(used)}${c.limitValue > 0 ? `, limite disponível ${money(limit.available)} de ${money(c.limitValue)}` : ''}. ${expanded ? 'Fechar' : 'Ver'} lançamentos`}
                 onClick={() => toggleCard(c.id)}
                 onKeyDown={e => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); toggleCard(c.id); } }}
                 style={{ background: `linear-gradient(135deg, ${ca}, ${cb})` }}>
@@ -123,16 +124,22 @@ export default function CardsSection({
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: '1.2rem' }}>
                   <div>
                     <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.8)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>{c.name}</div>
-                    <div className="mono" style={{ fontSize: '0.95rem', color: '#fff', fontWeight: 600 }}>
-                      {money(used)}{c.limitValue > 0 && <span style={{ color: 'rgba(255,255,255,0.7)', fontSize: '0.78rem', fontWeight: 500 }}> / {money(c.limitValue)}</span>}
-                    </div>
+                    <div className="mono" style={{ fontSize: '1rem', color: '#fff', fontWeight: 600 }}>{money(used)}</div>
+                    <div style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.75)' }}>fatura de {monthLabel(selectedMonth).split(' ')[0]}</div>
                   </div>
                   {expanded ? <ChevronUp size={18} color="rgba(255,255,255,0.85)" /> : <ChevronDown size={18} color="rgba(255,255,255,0.85)" />}
                 </div>
                 {c.limitValue > 0 && (
-                  <div style={{ height: 4, background: 'rgba(255,255,255,0.25)', borderRadius: 2, marginTop: '0.6rem', overflow: 'hidden' }}>
-                    <div style={{ height: '100%', width: `${pct}%`, background: used > c.limitValue ? '#FFB4A2' : 'rgba(255,255,255,0.9)' }} />
-                  </div>
+                  <>
+                    <div title="Limite usado: inclui as parcelas dos próximos meses" style={{ height: 4, background: 'rgba(255,255,255,0.25)', borderRadius: 2, marginTop: '0.6rem', overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${limit.pct}%`, background: limit.over ? '#FFB4A2' : 'rgba(255,255,255,0.9)' }} />
+                    </div>
+                    <div className="mono" style={{ fontSize: '0.72rem', marginTop: '0.35rem', color: limit.over ? '#FFD2C7' : 'rgba(255,255,255,0.85)' }}>
+                      {limit.over
+                        ? `Acima do limite em ${money(-limit.available)}`
+                        : `Disponível ${money(limit.available)} de ${money(c.limitValue)}`}
+                    </div>
+                  </>
                 )}
                 {due && (
                   <div style={{ fontSize: '0.75rem', fontWeight: 600, marginTop: '0.55rem', color: due.urgent ? '#FFD2C7' : 'rgba(255,255,255,0.85)' }}>
@@ -190,7 +197,7 @@ export default function CardsSection({
 
       {activeCard && (
         <CardLedger
-          card={activeCard} cards={cards} people={people} selectedMonth={selectedMonth}
+          card={activeCard} cards={cards} allTransactions={cardTransactions} people={people} selectedMonth={selectedMonth}
           monthTransactions={cardTransactions.filter(t => t.cardId === activeCard.id && matchesMonth(t, selectedMonth))}
           filterPerson={filterPerson}
           onNewEntry={onNewEntry} onRemoveTx={onRemoveTx} onUpdateTx={onUpdateTx} authorName={authorName}
@@ -285,7 +292,7 @@ function PayeeTile({ payee, owed, entryCount, selectedMonth, expanded, onToggle,
   );
 }
 
-function CardLedger({ card, cards, people, monthTransactions, filterPerson, selectedMonth, onNewEntry, onRemoveTx, onUpdateTx, onUpdateDueDay, onUpdateColor, onToggleInvoice, personName, personColor, authorName, readOnly }) {
+function CardLedger({ card, cards, allTransactions, people, monthTransactions, filterPerson, selectedMonth, onNewEntry, onRemoveTx, onUpdateTx, onUpdateDueDay, onUpdateColor, onToggleInvoice, personName, personColor, authorName, readOnly }) {
   const ref = useRef(null);
   // Ao abrir um cartão, traz os lançamentos para a tela (no celular ficam lá embaixo).
   useEffect(() => {
@@ -302,6 +309,7 @@ function CardLedger({ card, cards, people, monthTransactions, filterPerson, sele
   // Fatura com as compras deste mês (cartão: vence no mês seguinte; pessoa: no próprio mês).
   const invoiceTotal = sumAmounts(monthTransactions);
   const month = monthLabel(selectedMonth).split(' ')[0];
+  const limit = !payee && card.limitValue > 0 ? cardLimitUsage(card, allTransactions || []) : null;
   const due = invoiceInfo(card, selectedMonth, invoiceTotal);
   const dueColor = due?.paid ? 'var(--success)' : due?.urgent ? 'var(--danger)' : 'var(--text-muted)';
 
@@ -360,6 +368,14 @@ function CardLedger({ card, cards, people, monthTransactions, filterPerson, sele
         ))}
       </div>
 
+      {limit && (
+        <p className="hint" style={{ margin: '-0.4rem 0 0.9rem', color: limit.over ? 'var(--danger)' : undefined }}>
+          Limite usado hoje: <strong className="mono">{money(limit.used)}</strong> de {money(card.limitValue)}
+          {limit.future > 0 && <> (inclui <span className="mono">{money(limit.future)}</span> em parcelas dos próximos meses)</>}
+          {' · '}{limit.over ? `acima do limite em ${money(-limit.available)}` : <>disponível <strong className="mono">{money(limit.available)}</strong></>}.
+          {' '}Cada fatura marcada como paga libera o limite dela.
+        </p>
+      )}
       {!readOnly && people.length === 0 && (
         <p className="muted" style={{ marginBottom: '0.75rem' }}>Cadastre uma pessoa acima para lançar gastos neste cartão.</p>
       )}
