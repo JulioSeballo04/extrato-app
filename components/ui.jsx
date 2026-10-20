@@ -83,7 +83,7 @@ export function Sheet({ title, onClose, children }) {
 export function Toast({ toast, onClose }) {
   useEffect(() => {
     if (!toast || toast.persistent) return undefined;
-    const t = setTimeout(onClose, 6000);
+    const t = setTimeout(onClose, 10000);
     return () => clearTimeout(t);
   }, [toast]);
   if (!toast) return null;

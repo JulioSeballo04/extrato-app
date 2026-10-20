@@ -6,7 +6,7 @@ import { StatusBadge } from '../ui';
 import { EntryList, OUTSIDE_CARD } from './Entries';
 import { money, monthLabel, matchesMonth, isRecurring, isPaidIn, dueDateIn, entryStatus, sumAmounts } from '../../lib/ledger';
 
-export default function OtherExpensesSection({ expenses, people, filterPerson, selectedMonth, onNewEntry, onRemove, onUpdate, onTogglePaid, personName, personColor, readOnly }) {
+export default function OtherExpensesSection({ expenses, people, filterPerson, selectedMonth, onNewEntry, onRemove, onUpdate, onTogglePaid, personName, personColor, authorName, readOnly }) {
   const [onlyFixed, setOnlyFixed] = useState(false);
 
   const inMonth = expenses.filter(e => matchesMonth(e, selectedMonth) && (filterPerson === 'all' || e.personId === filterPerson));
@@ -38,7 +38,7 @@ export default function OtherExpensesSection({ expenses, people, filterPerson, s
           <StatusBadge status={entryStatus(isPaidIn(e, selectedMonth), dueDateIn(e, selectedMonth))} readOnly={readOnly}
             onToggle={() => onTogglePaid(e.id, selectedMonth)} />
         )}
-        onUpdate={onUpdate} onRemove={onRemove}
+        onUpdate={onUpdate} onRemove={onRemove} selectedMonth={selectedMonth} authorName={authorName}
         personName={personName} personColor={personColor}
         emptyText={onlyFixed ? 'Nenhum gasto fixo neste mês.' : `Nenhum gasto fora do cartão em ${monthLabel(selectedMonth)}.`}
       />

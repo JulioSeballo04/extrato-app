@@ -137,7 +137,10 @@ service cloud.firestore {
           && d.paid is bool
           && (!('installmentGroupId' in d) || isIdString(d.installmentGroupId))
           && (!('splitGroupId' in d) || isIdString(d.splitGroupId))
-          && (!('splitCount' in d) || (d.splitCount is int && d.splitCount >= 2 && d.splitCount <= 20));
+          && (!('splitCount' in d) || (d.splitCount is int && d.splitCount >= 2 && d.splitCount <= 20))
+          // Fixo encerrado: último mês em que vale. Quem lançou: uid de quem criou.
+          && (!('endMonth' in d) || (d.endMonth is string && d.endMonth.matches('^[0-9]{4}-[0-9]{2}$')))
+          && (!('createdBy' in d) || (d.createdBy is string && d.createdBy.size() <= 128));
       }
 
       match /people/{id} {
@@ -156,7 +159,8 @@ service cloud.firestore {
         allow read: if isMember(spaceId);
         allow create, update: if canEdit(spaceId)
           && request.resource.data.keys().hasOnly(['cardId', 'personId', 'description', 'amount', 'date', 'fixed', 'category',
-               'installmentNumber', 'installmentTotal', 'installmentGroupId', 'splitGroupId', 'splitCount', 'paid'])
+               'installmentNumber', 'installmentTotal', 'installmentGroupId', 'splitGroupId', 'splitCount', 'paid',
+               'endMonth', 'createdBy'])
           && isIdString(request.resource.data.cardId)
           && validEntry(request.resource.data);
         allow delete: if canEdit(spaceId);
@@ -166,7 +170,8 @@ service cloud.firestore {
         allow read: if isMember(spaceId);
         allow create, update: if canEdit(spaceId)
           && request.resource.data.keys().hasOnly(['personId', 'description', 'amount', 'date', 'fixed', 'category',
-               'installmentNumber', 'installmentTotal', 'installmentGroupId', 'splitGroupId', 'splitCount', 'paid', 'paidMonths'])
+               'installmentNumber', 'installmentTotal', 'installmentGroupId', 'splitGroupId', 'splitCount', 'paid', 'paidMonths',
+               'endMonth', 'createdBy'])
           && isMonthList(request.resource.data.paidMonths)
           && validEntry(request.resource.data);
         allow delete: if canEdit(spaceId);

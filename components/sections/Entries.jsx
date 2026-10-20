@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { Pencil, Trash2, Check, X, ChevronDown } from 'lucide-react';
 import { Dot, Tag, Sheet, MoneyInput } from '../ui';
-import { CATEGORIES, DEFAULT_CATEGORY, money, parseAmount, amountInput, fmtDate, isRecurring, defaultDateFor } from '../../lib/ledger';
+import { CATEGORIES, DEFAULT_CATEGORY, money, parseAmount, amountInput, fmtDate, isRecurring, defaultDateFor, dueDateIn, changeScopes, splitAmount } from '../../lib/ledger';
 
 export const OUTSIDE_CARD = 'outside';
 
@@ -27,7 +27,10 @@ export function EntryForm({ people, cards, selectedMonth, initialTarget, onSubmi
   const paidNum = Math.min(installmentsNum, Math.max(0, Math.floor(Number(paidInstallments)) || 0));
   const splitCount = 1 + splitWith.filter(id => id !== personId).length;
   const value = parseAmount(amount);
-  const each = value / splitCount / installmentsNum;
+  // Mesmos centavos que serão gravados (ver splitAmount): podem variar 1 centavo.
+  const parts = splitAmount(value, splitCount).flatMap(share => splitAmount(share, installmentsNum));
+  const minPart = Math.min(...parts);
+  const maxPart = Math.max(...parts);
 
   function choosePerson(id) {
     setPersonId(id);
@@ -135,7 +138,7 @@ export function EntryForm({ people, cards, selectedMonth, initialTarget, onSubmi
 
         {value > 0 && (installmentsNum > 1 || splitCount > 1) && (
           <p className="hint" role="status">
-            Vai gerar {installmentsNum * splitCount} lançamento{installmentsNum * splitCount > 1 ? 's' : ''} de <strong className="mono">{money(each)}</strong>
+            Vai gerar {installmentsNum * splitCount} lançamento{installmentsNum * splitCount > 1 ? 's' : ''} de <strong className="mono">{minPart === maxPart ? money(maxPart) : `${money(minPart)} a ${money(maxPart)}`}</strong>
             {installmentsNum > 1 && (paidNum > 0
               ? <>: {paidNum} já paga{paidNum > 1 ? 's' : ''} (antes de {fmtDate(date)}) e {installmentsNum - paidNum} a partir de {fmtDate(date)}, uma por mês</>
               : <>, uma parcela por mês a partir de {fmtDate(date)}</>)}
@@ -162,18 +165,37 @@ export function PersonChip({ person, pressed, onClick, color }) {
 
 // Lista de lançamentos (cartão ou fora dele), com edição na própria linha.
 // `status(item)` devolve o selo de pagamento (ou null) daquela linha.
-export function EntryList({ items, people, status, onUpdate, onRemove, personName, personColor, readOnly, emptyText }) {
+// Ao editar ou apagar uma parcela, parte de compra dividida ou fixo, pergunta
+// a quem a mudança vale (ver changeScopes) antes de aplicar.
+export function EntryList({ items, people, status, onUpdate, onRemove, personName, personColor, readOnly, emptyText, selectedMonth, authorName }) {
   const [editingId, setEditingId] = useState(null);
+  const [asking, setAsking] = useState(null); // { item, action: 'edit' | 'delete', patch? }
 
   if (items.length === 0) return <p className="muted">{emptyText}</p>;
+
+  function remove(t) {
+    const scopes = changeScopes(t, selectedMonth, 'delete');
+    if (scopes.length === 0) onRemove(t, 'one');
+    else setAsking({ item: t, action: 'delete', scopes });
+  }
+  function save(t, patch) {
+    setEditingId(null);
+    const scopes = changeScopes(t, selectedMonth, 'edit');
+    if (scopes.length === 0) onUpdate(t, patch, 'one');
+    else setAsking({ item: t, action: 'edit', patch, scopes });
+  }
+  function choose(scope) {
+    const { item, action, patch } = asking;
+    setAsking(null);
+    if (action === 'delete') onRemove(item, scope);
+    else onUpdate(item, patch, scope);
+  }
 
   return (
     <div>
       {items.map(t => (
         editingId === t.id ? (
-          <EditRow key={t.id} item={t} people={people}
-            onSave={patch => { onUpdate(t.id, patch); setEditingId(null); }}
-            onCancel={() => setEditingId(null)} />
+          <EditRow key={t.id} item={t} people={people} onSave={patch => save(t, patch)} onCancel={() => setEditingId(null)} />
         ) : (
           <div key={t.id} className="row">
             <div className="row-line" style={{ flexWrap: 'nowrap', alignItems: 'baseline' }}>
@@ -181,26 +203,52 @@ export function EntryList({ items, people, status, onUpdate, onRemove, personNam
               <span className="mono" style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>{money(t.amount)}</span>
             </div>
             <div className="row-line" style={{ gap: '0.4rem' }}>
-              <span className="mono" style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>{fmtDate(t.date)}</span>
+              <span className="mono" style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                {fmtDate(selectedMonth && isRecurring(t) ? dueDateIn(t, selectedMonth) : t.date)}
+              </span>
               <Dot color={personColor(t.personId)} />
               <span style={{ color: 'var(--text-dim)', fontSize: '0.8rem' }}>{personName(t.personId)}</span>
               <Tag>{t.category || DEFAULT_CATEGORY}</Tag>
               {isRecurring(t) && <Tag tone="accent">Fixo</Tag>}
               {t.installmentTotal > 1 && <Tag tone="info" mono title="Parcela">{t.installmentNumber}/{t.installmentTotal}</Tag>}
               {t.splitGroupId && <Tag title={`Dividido entre ${t.splitCount} pessoas`}>Dividido ÷{t.splitCount}</Tag>}
+              {authorName?.(t.createdBy) && <span className="hint" title="Quem lançou">por {authorName(t.createdBy)}</span>}
               <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
                 {status(t)}
                 {!readOnly && (
                   <>
-                    <button className="icon" onClick={() => setEditingId(t.id)} aria-label={`Editar ${t.description}`} title="Editar"><Pencil size={15} /></button>
-                    <button className="icon delete" onClick={() => onRemove(t)} aria-label={`Apagar ${t.description}`} title="Apagar"><Trash2 size={15} /></button>
+                    <button className="icon" onClick={() => { setAsking(null); setEditingId(t.id); }} aria-label={`Editar ${t.description}`} title="Editar"><Pencil size={15} /></button>
+                    <button className="icon delete" onClick={() => remove(t)} aria-label={`Apagar ${t.description}`} title="Apagar"><Trash2 size={15} /></button>
                   </>
                 )}
               </span>
             </div>
+            {asking?.item.id === t.id && (
+              <ScopeChooser asking={asking} onChoose={choose} onCancel={() => setAsking(null)} />
+            )}
           </div>
         )
       ))}
+    </div>
+  );
+}
+
+// "Apagar / Salvar alteração em: [Só esta parcela] [Esta e as próximas] [A compra inteira]"
+function ScopeChooser({ asking, onChoose, onCancel }) {
+  const del = asking.action === 'delete';
+  return (
+    <div role="group" aria-label={del ? 'O que apagar' : 'Onde aplicar a alteração'}
+      onKeyDown={e => { if (e.key === 'Escape') onCancel(); }}
+      style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap', padding: '0.5rem', marginTop: '0.25rem', background: 'var(--panel-alt)', borderRadius: 10 }}>
+      <span style={{ fontSize: '0.8rem', color: del ? 'var(--danger)' : 'var(--text-dim)', marginRight: '0.2rem' }}>
+        {del ? 'Apagar:' : 'Salvar alteração em:'}
+      </span>
+      {asking.scopes.map((sc, i) => (
+        <button key={sc.key} className={`ghost${del && sc.key !== 'from' ? ' danger' : ''}`} onClick={() => onChoose(sc.key)} autoFocus={i === 0}>
+          {sc.label}
+        </button>
+      ))}
+      <button className="ghost" onClick={onCancel}>Cancelar</button>
     </div>
   );
 }
@@ -211,12 +259,21 @@ function EditRow({ item, people, onSave, onCancel }) {
     description: item.description, amount: amountInput(item.amount), personId: item.personId,
     date: item.date, fixed: !!item.fixed, category: item.category || DEFAULT_CATEGORY,
   });
-  const set = patch => setDraft(d => ({ ...d, ...patch }));
+  const [error, setError] = useState('');
+  const set = patch => { setError(''); setDraft(d => ({ ...d, ...patch })); };
   const isInstallment = item.installmentTotal > 1;
+
+  function submit(e) {
+    e.preventDefault();
+    const amount = parseAmount(draft.amount);
+    if (!(amount > 0)) { setError('Informe um valor maior que zero.'); return; }
+    if (!draft.description.trim()) { setError('A descrição não pode ficar vazia.'); return; }
+    onSave({ ...draft, amount });
+  }
 
   return (
     <form
-      onSubmit={e => { e.preventDefault(); onSave({ ...draft, amount: parseAmount(draft.amount) }); }}
+      onSubmit={submit}
       onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); onCancel(); } }}
       style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', padding: '0.5rem', margin: '0.25rem 0', background: 'var(--panel-alt)', borderRadius: 10 }}
     >
@@ -228,7 +285,7 @@ function EditRow({ item, people, onSave, onCancel }) {
       <select value={draft.category} onChange={e => set({ category: e.target.value })} aria-label="Categoria">
         {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
       </select>
-      <MoneyInput value={draft.amount} onChange={v => set({ amount: v })} aria-label="Valor" style={{ width: 130 }} />
+      <MoneyInput value={draft.amount} onChange={v => set({ amount: v })} aria-label="Valor" aria-invalid={!!error} style={{ width: 130 }} />
       {!isInstallment && (
         <label className="label-sm" style={{ cursor: 'pointer' }}>
           <input type="checkbox" checked={draft.fixed} onChange={e => set({ fixed: e.target.checked })} />
@@ -237,6 +294,7 @@ function EditRow({ item, people, onSave, onCancel }) {
       )}
       <button type="submit" className="icon" aria-label="Salvar" title="Salvar (Enter)" style={{ color: 'var(--success)' }}><Check size={18} /></button>
       <button type="button" className="icon" onClick={onCancel} aria-label="Cancelar" title="Cancelar (Esc)"><X size={18} /></button>
+      {error && <span role="alert" style={{ color: 'var(--danger)', fontSize: '0.8rem', flexBasis: '100%' }}>{error}</span>}
     </form>
   );
 }

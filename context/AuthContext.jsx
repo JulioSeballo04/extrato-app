@@ -17,7 +17,7 @@ import {
   reauthenticateWithPopup,
   deleteUser,
 } from 'firebase/auth';
-import { auth } from '../lib/firebase';
+import { auth, clearLocalDataAndReload } from '../lib/firebase';
 
 const AuthContext = createContext(null);
 
@@ -71,8 +71,9 @@ export function AuthProvider({ children }) {
     setUser({ ...auth.currentUser });
   }
 
-  function logout() {
-    return signOut(auth);
+  async function logout() {
+    await signOut(auth);
+    await clearLocalDataAndReload();
   }
 
   // Envia o link de redefinição. Não revela se o e-mail tem conta ou não.
@@ -98,8 +99,9 @@ export function AuthProvider({ children }) {
   }
 
   // Remove o usuário do Firebase Auth (os dados já devem ter sido apagados).
-  function deleteAccount() {
-    return deleteUser(auth.currentUser);
+  async function deleteAccount() {
+    await deleteUser(auth.currentUser);
+    await clearLocalDataAndReload();
   }
 
   return (

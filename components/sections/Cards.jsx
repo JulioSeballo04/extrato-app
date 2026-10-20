@@ -9,8 +9,8 @@ import { money, parseAmount, monthLabel, matchesMonth, isRecurring, invoiceInfo,
 
 export default function CardsSection({
   cards, people, cardTransactions, filterPerson, selectedMonth, expandedCard, setExpandedCard,
-  onAddCard, onRemoveCard, onUpdateDueDay, onUpdateColor, onToggleInvoice, onNewEntry, onRemoveTx, onTogglePaid, onUpdateTx,
-  personName, personColor, cardGradients, readOnly, formOpen, setFormOpen,
+  onAddCard, onRemoveCard, onUpdateDueDay, onUpdateColor, onToggleInvoice, onNewEntry, onRemoveTx, onUpdateTx,
+  personName, personColor, authorName, cardGradients, readOnly, formOpen, setFormOpen,
 }) {
   const [name, setName] = useState('');
   const [limitValue, setLimitValue] = useState('');
@@ -193,7 +193,7 @@ export default function CardsSection({
           card={activeCard} people={people} selectedMonth={selectedMonth}
           monthTransactions={cardTransactions.filter(t => t.cardId === activeCard.id && matchesMonth(t, selectedMonth))}
           filterPerson={filterPerson}
-          onNewEntry={onNewEntry} onRemoveTx={onRemoveTx} onTogglePaid={onTogglePaid} onUpdateTx={onUpdateTx}
+          onNewEntry={onNewEntry} onRemoveTx={onRemoveTx} onUpdateTx={onUpdateTx} authorName={authorName}
           onUpdateDueDay={onUpdateDueDay} onUpdateColor={onUpdateColor} onToggleInvoice={onToggleInvoice}
           personName={personName} personColor={personColor} readOnly={readOnly}
         />
@@ -285,7 +285,7 @@ function PayeeTile({ payee, owed, entryCount, selectedMonth, expanded, onToggle,
   );
 }
 
-function CardLedger({ card, people, monthTransactions, filterPerson, selectedMonth, onNewEntry, onRemoveTx, onTogglePaid, onUpdateTx, onUpdateDueDay, onUpdateColor, onToggleInvoice, personName, personColor, readOnly }) {
+function CardLedger({ card, people, monthTransactions, filterPerson, selectedMonth, onNewEntry, onRemoveTx, onUpdateTx, onUpdateDueDay, onUpdateColor, onToggleInvoice, personName, personColor, authorName, readOnly }) {
   const ref = useRef(null);
   // Ao abrir um cartão, traz os lançamentos para a tela (no celular ficam lá embaixo).
   useEffect(() => {
@@ -367,10 +367,12 @@ function CardLedger({ card, people, monthTransactions, filterPerson, selectedMon
       <EntryList
         items={sorted} people={people} readOnly={readOnly}
         // Parcela no cartão: marca se aquela parcela já foi quitada (não vence sozinha; quem vence é a fatura).
-        // Pessoa a pagar: o "pago" é do mês inteiro (botão acima), não de cada lançamento.
+        // A parcela no cartão segue a fatura do mês: paga quando a fatura foi paga
+        // (ou quando foi lançada como "já paga"). Pessoa a pagar: o "pago" é do mês.
         status={t => (t.installmentTotal > 1 && !payee
-          ? <StatusBadge status={t.paid ? 'paid' : 'pending'} readOnly={readOnly} onToggle={() => onTogglePaid(t.id)} />
+          ? <StatusBadge status={t.paid || due?.paid ? 'paid' : 'pending'} readOnly />
           : null)}
+        selectedMonth={selectedMonth} authorName={authorName}
         onUpdate={onUpdateTx} onRemove={onRemoveTx}
         personName={personName} personColor={personColor}
         emptyText={payee

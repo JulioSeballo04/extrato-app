@@ -8,7 +8,7 @@ import { BRAND } from '../lib/brand';
 import { PALETTES, AUTO_PALETTE, DEFAULT_PALETTE, resolvePaletteKey, paletteVars, writeCachedPalette, systemPrefersDark } from '../lib/theme';
 import {
   DEFAULT_CATEGORY, monthLabel, capitalize, currentMonth, shiftMonth, monthsLaterDate, matchesMonth, isRecurring, isPaidIn,
-  isInvoicePaid, parseDueDay, sumAmounts, buildMonthBills, isPayee,
+  isInvoicePaid, parseDueDay, sumAmounts, buildMonthBills, isPayee, splitAmount, entriesInScope, dueDateIn,
 } from '../lib/ledger';
 import { APP_CSS } from './appStyles';
 import { Toast } from './ui';
@@ -194,6 +194,12 @@ export default function ExtratoApp({ spacesApi }) {
     return pal.people[idx >= 0 ? idx % pal.people.length : 0];
   }
   const nextOrder = list => list.reduce((m, x) => Math.max(m, Number(x.order) || 0), 0) + 1;
+  // Quem lançou: só aparece em espaços com mais de um membro.
+  function authorName(uid) {
+    if (!uid || (space?.members?.length || 0) < 2) return null;
+    if (uid === user?.uid) return 'você';
+    return (space.labels?.[uid] || '').split('@')[0] || null;
+  }
 
   function addPerson(name, salary) {
     if (!name.trim()) return;
@@ -240,16 +246,18 @@ export default function ExtratoApp({ spacesApi }) {
     // estiver marcado em "dividir com" (ex.: consórcio dividido com a namorada).
     const participants = [entry.personId, ...((entry.splitWith || []).filter(id => id && id !== entry.personId))];
     const splitGroupId = participants.length > 1 ? newId() : undefined;
-    const perInstallmentAmount = (Number(entry.amount) || 0) / participants.length / total;
+    // Centavos inteiros que somam exatamente o total: por pessoa e depois por parcela.
+    const shares = splitAmount(entry.amount, participants.length).map(share => splitAmount(share, total));
     // A data informada é a da PRÓXIMA parcela a vencer (nº paidCount+1).
     // As parcelas já pagas ficam com datas retroativas; as futuras seguem em frente a partir dela.
-    return participants.flatMap(personId =>
+    return participants.flatMap((personId, p) =>
       Array.from({ length: total }, (_, i) => ({
         ...extra,
         id: newId(),
         personId,
+        createdBy: user?.uid,
         description: entry.description.trim(),
-        amount: perInstallmentAmount,
+        amount: shares[p][i],
         date: monthsLaterDate(entry.date, i - paidCount),
         fixed: total === 1 && !!entry.fixed,
         category: entry.category || DEFAULT_CATEGORY,
@@ -271,28 +279,65 @@ export default function ExtratoApp({ spacesApi }) {
       ? { text: 'Gasto lançado.' }
       : { text: `Gasto lançado em ${monthLabel(entryMonth)}.`, action: { label: 'Ir para o mês', run: () => setSelectedMonth(entryMonth) } });
   }
-  // Apagar um lançamento não pede confirmação: dá para desfazer pelo aviso.
-  function removeEntry(coll, item) {
-    write(store.remove(coll, item.id));
-    setToast({ text: `“${item.description}” apagado.`, action: { label: 'Desfazer', run: () => write(store.set(coll, item.id, item)) } });
+  const entriesOf = coll => (coll === 'cardTransactions' ? cardTransactions : otherExpenses);
+
+  // Apagar não pede confirmação (dá para desfazer pelo aviso). `scope` vem de
+  // changeScopes: só esta / esta e as próximas / a compra inteira; num fixo,
+  // 'from' encerra a partir do mês exibido em vez de apagar o histórico.
+  function removeEntry(coll, item, scope = 'one') {
+    if (scope === 'from') {
+      const endMonth = shiftMonth(selectedMonth, -1);
+      write(store.update(coll, item, { endMonth }));
+      setToast({
+        text: `“${item.description}” encerrado a partir de ${monthLabel(selectedMonth)}.`,
+        action: { label: 'Desfazer', run: () => write(store.set(coll, item.id, item)) },
+      });
+      return;
+    }
+    const items = entriesInScope(entriesOf(coll), item, scope);
+    write(store.removeMany(items.map(x => [coll, x.id])));
+    setToast({
+      text: items.length > 1 ? `“${item.description}” apagado (${items.length} lançamentos).` : `“${item.description}” apagado.`,
+      action: { label: 'Desfazer', run: () => write(store.setMany(coll, items)) },
+    });
   }
-  function toggleCardTransactionPaid(id) {
-    const t = cardTransactions.find(x => x.id === id);
-    if (t) write(store.update('cardTransactions', t, { paid: !t.paid }));
-  }
-  function editPatch(x, patch) {
-    return {
-      description: patch.description?.trim() || x.description,
+
+  // Edição. Descrição, categoria e valor valem para todo o alcance escolhido;
+  // data, pessoa e "fixo" só para o lançamento editado (senão as partes de uma
+  // compra dividida virariam da mesma pessoa).
+  function updateEntry(coll, item, patch, scope = 'one') {
+    const clean = {
+      description: patch.description?.trim() || item.description,
       amount: Number(patch.amount) || 0,
-      date: patch.date || x.date,
-      personId: patch.personId || x.personId,
-      fixed: !(x.installmentTotal > 1) && !!patch.fixed,
-      category: patch.category || x.category || DEFAULT_CATEGORY,
+      date: patch.date || item.date,
+      personId: patch.personId || item.personId,
+      fixed: !(item.installmentTotal > 1) && !!patch.fixed,
+      category: patch.category || item.category || DEFAULT_CATEGORY,
     };
-  }
-  function updateCardTransaction(id, patch) {
-    const t = cardTransactions.find(x => x.id === id);
-    if (t) write(store.update('cardTransactions', t, editPatch(t, patch)));
+    if (scope === 'from') {
+      // Fixo: o antigo vale até o mês anterior; daqui em diante, um novo com as mudanças.
+      const endMonth = shiftMonth(selectedMonth, -1);
+      if (!clean.fixed) {
+        write(store.update(coll, item, { endMonth: selectedMonth }));
+        return;
+      }
+      const day = (clean.date !== item.date ? clean.date : dueDateIn(item, selectedMonth)).slice(8, 10);
+      const next = {
+        ...item, ...clean, id: newId(), createdBy: user?.uid, date: `${selectedMonth}-${day}`, paid: false,
+        ...(coll === 'otherExpenses' ? { paidMonths: (item.paidMonths || []).filter(m => m >= selectedMonth) } : {}),
+      };
+      write(store.update(coll, item, { endMonth }));
+      write(store.set(coll, next.id, next));
+      return;
+    }
+    // Só o que de fato mudou vai para as outras partes (o valor de cada parcela
+    // pode diferir em centavos; não mexer nele se não foi editado).
+    const shared = Object.fromEntries(['description', 'category', 'amount']
+      .filter(k => clean[k] !== item[k]).map(k => [k, clean[k]]));
+    for (const x of entriesInScope(entriesOf(coll), item, scope)) {
+      if (x.id === item.id) write(store.update(coll, x, clean));
+      else if (Object.keys(shared).length) write(store.update(coll, x, shared));
+    }
   }
   // Gasto fixo: marca o mês em `paidMonths`; os demais têm um `paid` só.
   function toggleOtherExpensePaid(id, month) {
@@ -304,10 +349,6 @@ export default function ExtratoApp({ spacesApi }) {
   function toggleInvoicePaid(cardId, month) {
     const c = cards.find(x => x.id === cardId);
     if (c) write(store.toggleMonth('cards', cardId, 'paidInvoices', month, !isInvoicePaid(c, month)));
-  }
-  function updateOtherExpense(id, patch) {
-    const e = otherExpenses.find(x => x.id === id);
-    if (e) write(store.update('otherExpenses', e, editPatch(e, patch)));
   }
   function clearAll() {
     write(store.removeMany([
@@ -516,7 +557,7 @@ export default function ExtratoApp({ spacesApi }) {
               cards={cards} people={people} cardTransactions={cardTransactions}
               filterPerson={filterPerson} selectedMonth={selectedMonth} expandedCard={expandedCard} setExpandedCard={setExpandedCard}
               onAddCard={addCard} onRemoveCard={removeCard} onUpdateDueDay={updateCardDueDay} onUpdateColor={updateCardColor} onToggleInvoice={toggleInvoicePaid}
-              onNewEntry={openEntryForm} onRemoveTx={t => removeEntry('cardTransactions', t)} onTogglePaid={toggleCardTransactionPaid} onUpdateTx={updateCardTransaction}
+              onNewEntry={openEntryForm} onRemoveTx={(t, scope) => removeEntry('cardTransactions', t, scope)} onUpdateTx={(t, patch, scope) => updateEntry('cardTransactions', t, patch, scope)} authorName={authorName}
               personName={personName} personColor={personColor} cardGradients={pal.cardGradients} readOnly={readOnly}
               formOpen={cardFormOpen} setFormOpen={setCardFormOpen}
             />
@@ -527,7 +568,7 @@ export default function ExtratoApp({ spacesApi }) {
           <div id="sec-other" data-nav="sec-other" style={{ scrollMarginTop: '1rem' }}>
             <OtherExpensesSection
               expenses={otherExpenses} people={people} filterPerson={filterPerson} selectedMonth={selectedMonth}
-              onNewEntry={openEntryForm} onRemove={e => removeEntry('otherExpenses', e)} onUpdate={updateOtherExpense} onTogglePaid={toggleOtherExpensePaid}
+              onNewEntry={openEntryForm} onRemove={(e, scope) => removeEntry('otherExpenses', e, scope)} onUpdate={(e, patch, scope) => updateEntry('otherExpenses', e, patch, scope)} onTogglePaid={toggleOtherExpensePaid} authorName={authorName}
               personName={personName} personColor={personColor} readOnly={readOnly}
             />
           </div>
