@@ -3,14 +3,16 @@
 import React, { useState } from 'react';
 import { Pencil, Trash2, Check, ChevronDown, EyeOff } from 'lucide-react';
 import { Dot, Tag, Sheet, MoneyInput } from '../ui';
-import { CATEGORIES, DEFAULT_CATEGORY, money, parseAmount, amountInput, fmtDate, isRecurring, defaultDateFor, dueDateIn, changeScopes, splitAmount } from '../../lib/ledger';
+import { CATEGORIES, DEFAULT_CATEGORY, money, parseAmount, amountInput, fmtDate, isRecurring, defaultDateFor, dueDateIn, changeScopes, splitAmount, PAYMENT_METHODS, methodLabel, parseTarget, outsideTarget, DEFAULT_GROUP } from '../../lib/ledger';
 
 export const OUTSIDE_CARD = 'outside';
 
 // Formulário único de "Novo gasto": no cartão ou fora dele. O essencial fica à
 // vista; parcelas, divisão e "fixo" ficam em "Mais opções".
-export function EntryForm({ people, cards, selectedMonth, initialTarget, onSubmit, onClose, personColor, defaultPersonId, members = [] }) {
+export function EntryForm({ people, cards, selectedMonth, initialTarget, onSubmit, onClose, personColor, defaultPersonId, members = [], groups = [] }) {
   const [target, setTarget] = useState(initialTarget ?? (cards[0]?.id || OUTSIDE_CARD));
+  const [method, setMethod] = useState(lastMethod());
+  const outside = parseTarget(target).outside;
   const [amount, setAmount] = useState('');
   const [desc, setDesc] = useState('');
   const [personId, setPersonId] = useState(defaultPersonId || people[0]?.id || '');
@@ -47,7 +49,10 @@ export function EntryForm({ people, cards, selectedMonth, initialTarget, onSubmi
     if (!personId) nextErrors.person = 'Escolha quem gastou.';
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length) return;
-    onSubmit(target === OUTSIDE_CARD ? null : target, {
+    const where = parseTarget(target);
+    if (where.outside) rememberMethod(method);
+    onSubmit(where.outside ? null : where.cardId, {
+      ...(where.outside ? { groupId: where.groupId, method } : {}),
       description: desc, amount: value, personId, date, category, fixed: installmentsNum === 1 && fixed,
       installments: installmentsNum, paidInstallments: paidNum, splitWith: splitWith.filter(id => id !== personId), hideFrom,
     });
@@ -75,9 +80,11 @@ export function EntryForm({ people, cards, selectedMonth, initialTarget, onSubmi
           <select value={target} onChange={e => setTarget(e.target.value)}>
             {cards.filter(c => c.kind !== 'payee').map(c => <option key={c.id} value={c.id}>Cartão {c.name}</option>)}
             {cards.filter(c => c.kind === 'payee').map(c => <option key={c.id} value={c.id}>Devo para {c.name}</option>)}
-            <option value={OUTSIDE_CARD}>Fora do cartão (Pix, boleto, dinheiro…)</option>
+            <TargetGroupOptions groups={groups} />
           </select>
         </label>
+
+        {outside && <MethodPicker method={method} setMethod={setMethod} />}
 
         <div className="field" role="group" aria-label="Quem gastou">
           Quem gastou
@@ -172,7 +179,7 @@ export function PersonChip({ person, pressed, onClick, color }) {
 // `status(item)` devolve o selo de pagamento (ou null) daquela linha.
 // Ao editar ou apagar uma parcela, parte de compra dividida ou fixo, pergunta
 // a quem a mudança vale (ver changeScopes) antes de aplicar.
-export function EntryList({ items, people, cards = [], members = [], visibilityLabel, status, onUpdate, onRemove, personName, personColor, readOnly, emptyText, selectedMonth, authorName }) {
+export function EntryList({ items, people, cards = [], groups = [], members = [], visibilityLabel, status, onUpdate, onRemove, personName, personColor, readOnly, emptyText, selectedMonth, authorName }) {
   const [editingId, setEditingId] = useState(null);
   const [asking, setAsking] = useState(null); // { item, action: 'edit' | 'delete', patch? }
 
@@ -200,7 +207,7 @@ export function EntryList({ items, people, cards = [], members = [], visibilityL
     <div>
       {items.map(t => (
         editingId === t.id ? (
-          <EditRow key={t.id} item={t} people={people} cards={cards} members={members} onSave={patch => save(t, patch)} onCancel={() => setEditingId(null)} />
+          <EditRow key={t.id} item={t} people={people} cards={cards} groups={groups} members={members} onSave={patch => save(t, patch)} onCancel={() => setEditingId(null)} />
         ) : (
           <div key={t.id} className="row">
             <div className="row-line" style={{ flexWrap: 'nowrap', alignItems: 'baseline' }}>
@@ -216,6 +223,7 @@ export function EntryList({ items, people, cards = [], members = [], visibilityL
               <Tag>{t.category || DEFAULT_CATEGORY}</Tag>
               {isRecurring(t) && <Tag tone="accent">Fixo</Tag>}
               {t.installmentTotal > 1 && <Tag tone="info" mono title="Parcela">{t.installmentNumber}/{t.installmentTotal}</Tag>}
+              {!t.cardId && methodLabel(t.method) && <Tag title="Forma de pagamento">{methodLabel(t.method)}</Tag>}
               {t.splitGroupId && <Tag title={`Dividido entre ${t.splitCount} pessoas`}>Dividido ÷{t.splitCount}</Tag>}
               {visibilityLabel?.(t) && (
                 <span className="tag" title="Os membros listados não veem este lançamento" style={{ color: 'var(--accent-light)', border: '1px solid var(--accent)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
@@ -265,11 +273,12 @@ function ScopeChooser({ asking, onChoose, onCancel }) {
 
 // Edição na linha: Enter salva, Esc cancela. Dá para mudar também a forma de
 // pagamento (outro cartão, pessoa a pagar ou fora do cartão) e a data.
-function EditRow({ item, people, cards, members = [], onSave, onCancel }) {
+function EditRow({ item, people, cards, groups = [], members = [], onSave, onCancel }) {
   const [draft, setDraft] = useState({
     description: item.description, amount: amountInput(item.amount), personId: item.personId,
     date: item.date, fixed: !!item.fixed, category: item.category || DEFAULT_CATEGORY,
-    target: item.cardId || OUTSIDE_CARD,
+    target: item.cardId || outsideTarget(item.groupId),
+    method: item.method || '',
     hideFrom: item.visibleTo?.length ? members.filter(m => !item.visibleTo.includes(m.uid)).map(m => m.uid) : [],
   });
   const [error, setError] = useState('');
@@ -315,7 +324,7 @@ function EditRow({ item, people, cards, members = [], onSave, onCancel }) {
           <select value={draft.target} onChange={e => set({ target: e.target.value })}>
             {realCards.map(c => <option key={c.id} value={c.id}>Cartão {c.name}</option>)}
             {payees.map(c => <option key={c.id} value={c.id}>Devo para {c.name}</option>)}
-            <option value={OUTSIDE_CARD}>Fora do cartão (Pix, boleto…)</option>
+            <TargetGroupOptions groups={groups} />
           </select>
         </label>
         <label className="field">
@@ -336,6 +345,11 @@ function EditRow({ item, people, cards, members = [], onSave, onCancel }) {
         </label>
       </div>
       <p className="hint" style={{ margin: '0.5rem 0 0' }}>{payHint}</p>
+      {!targetCard && (
+        <div style={{ marginTop: '0.6rem' }}>
+          <MethodPicker method={draft.method} setMethod={m => set({ method: m })} />
+        </div>
+      )}
       {members.length > 0 && (
         <div style={{ marginTop: '0.6rem' }}>
           <HideFromPicker members={members} hideFrom={draft.hideFrom} setHideFrom={fn => set({ hideFrom: typeof fn === 'function' ? fn(draft.hideFrom) : fn })} />
@@ -378,4 +392,40 @@ function HideFromPicker({ members, hideFrom, setHideFrom }) {
       )}
     </div>
   );
+}
+
+// "Onde": as listas de gastos fora do cartão ("Outros gastos", "Casa"…).
+function TargetGroupOptions({ groups }) {
+  const list = groups.length ? groups : [{ id: DEFAULT_GROUP, name: 'Outros gastos' }];
+  return (
+    <optgroup label="Fora do cartão (Pix, boleto, débito…)">
+      {list.map(g => <option key={g.id} value={outsideTarget(g.id)}>{g.name}</option>)}
+    </optgroup>
+  );
+}
+
+// Forma de pagamento fora do cartão (o crédito é lançar num cartão).
+function MethodPicker({ method, setMethod }) {
+  return (
+    <div className="field" role="group" aria-label="Forma de pagamento">
+      Forma de pagamento
+      <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+        {PAYMENT_METHODS.map(m => (
+          <button key={m.key} type="button" className="chip" aria-pressed={method === m.key}
+            onClick={() => setMethod(method === m.key ? '' : m.key)}>
+            {m.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// A última forma usada vira o padrão do próximo gasto (neste aparelho).
+const METHOD_KEY = 'gestor-de-gastos:ultima-forma';
+function lastMethod() {
+  try { return localStorage.getItem(METHOD_KEY) || 'pix'; } catch { return 'pix'; }
+}
+function rememberMethod(m) {
+  try { if (m) localStorage.setItem(METHOD_KEY, m); } catch { /* ignora */ }
 }

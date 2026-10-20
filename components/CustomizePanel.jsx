@@ -8,8 +8,9 @@ import { PALETTES, AUTO_PALETTE } from '../lib/theme';
 // Seções que o usuário pode mostrar/esconder. A ordem aqui é só a ordem do painel.
 export const SECTIONS = [
   { key: 'cards', label: 'Cartões de crédito' },
-  { key: 'other', label: 'Outros gastos' },
+  { key: 'other', label: 'Listas de gastos (Pix, débito…)' },
   { key: 'calendar', label: 'Calendário de contas' },
+  { key: 'payments', label: 'Crédito x débito' },
   { key: 'categories', label: 'Gastos por categoria' },
   { key: 'summary', label: 'Resumo por pessoa' },
   { key: 'people', label: 'Pessoas & salários' },

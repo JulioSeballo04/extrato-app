@@ -9,7 +9,7 @@ import { BRAND } from '../lib/brand';
 import { PALETTES, AUTO_PALETTE, DEFAULT_PALETTE, resolvePaletteKey, paletteVars, writeCachedPalette, systemPrefersDark } from '../lib/theme';
 import {
   DEFAULT_CATEGORY, monthLabel, capitalize, currentMonth, shiftMonth, monthsLaterDate, matchesMonth, isRecurring, isPaidIn,
-  isInvoicePaid, parseDueDay, sumAmounts, buildMonthBills, isPayee, splitAmount, entriesInScope, dueDateIn,
+  isInvoicePaid, parseDueDay, sumAmounts, buildMonthBills, isPayee, DEFAULT_GROUP, groupOf, parseTarget, methodLabel, splitAmount, entriesInScope, dueDateIn,
 } from '../lib/ledger';
 import { APP_CSS } from './appStyles';
 import { Toast } from './ui';
@@ -19,14 +19,15 @@ import AccountPanel from './AccountPanel';
 import CustomizePanel, { DEFAULT_VISIBLE } from './CustomizePanel';
 import PeopleSection from './sections/People';
 import CardsSection from './sections/Cards';
-import OtherExpensesSection from './sections/OtherExpenses';
+import OtherExpensesSection, { NewGroupButton } from './sections/OtherExpenses';
+import { PaymentsSection } from './sections/Payments';
 import { EntryForm, PersonChip } from './sections/Entries';
 import { CalendarSection, BillsPanel } from './sections/Calendar';
 import { CategorySummarySection, SummarySection, ReportSection } from './sections/Reports';
 import { MonthOverview, Onboarding, WhoAreYou } from './sections/Overview';
 
 const VISIBLE_SECTIONS_KEY = 'gestor-de-gastos:secoes-visiveis';
-const EMPTY_DATA = { people: [], cards: [], cardTransactions: [], otherExpenses: [] };
+const EMPTY_DATA = { people: [], cards: [], cardTransactions: [], otherExpenses: [], expenseGroups: [] };
 const SAVE_ERROR_TOAST = {
   tone: 'error', persistent: true,
   text: 'Não consegui salvar ou sincronizar agora. Verifique sua conexão.',
@@ -58,7 +59,13 @@ export default function ExtratoApp({ spacesApi }) {
   const [systemDark, setSystemDark] = useState(true);
   const [activeNav, setActiveNav] = useState('top');
   const installUi = useInstallUi(); // aviso de instalar o app + setinha no topo
-  const { people, cards, cardTransactions, otherExpenses } = data;
+  const { people, cards, cardTransactions, otherExpenses, expenseGroups = [] } = data;
+  // Listas de gastos fora do cartão: a padrão ("Outros gastos", renomeável) + as criadas.
+  const groups = [
+    { id: DEFAULT_GROUP, name: expenseGroups.find(g => g.id === DEFAULT_GROUP)?.name || 'Outros gastos', order: 0 },
+    ...expenseGroups.filter(g => g.id !== DEFAULT_GROUP),
+  ];
+  const groupIds = new Set(groups.map(g => g.id));
   // Ocultos (ex.: presente): o store manda cada um para hiddenEntries sozinho.
   const hiddenIds = new Set([...cardTransactions, ...otherExpenses].filter(x => x.visibleTo?.length).map(x => x.id));
   const store = spaceId ? spaceStore(spaceId, hiddenIds) : null;
@@ -346,7 +353,7 @@ export default function ExtratoApp({ spacesApi }) {
     const visibleTo = visibleToFor(entry.hideFrom);
     const extra = visibleTo ? { visibleTo } : {};
     if (cardId) write(store.setMany('cardTransactions', buildEntries(entry, { cardId, ...extra })));
-    else write(store.setMany('otherExpenses', buildEntries(entry, extra)));
+    else write(store.setMany('otherExpenses', buildEntries(entry, { ...extra, groupId: entry.groupId || DEFAULT_GROUP, ...(entry.method ? { method: entry.method } : {}) })));
     setEntryForm(null);
     const entryMonth = entry.date.slice(0, 7);
     setToast(entryMonth === selectedMonth
@@ -401,12 +408,18 @@ export default function ExtratoApp({ spacesApi }) {
     };
     // Só o que de fato mudou vai para as outras partes (o valor de cada parcela
     // pode diferir em centavos; não mexer nele se não foi editado).
-    const shared = Object.fromEntries(['description', 'category', 'amount']
-      .filter(k => clean[k] !== item[k]).map(k => [k, clean[k]]));
-
-    // Forma de pagamento: um cartão (ou pessoa a pagar) pelo id, ou 'outside'.
+    // Forma de pagamento: um cartão (ou pessoa a pagar) pelo id, ou fora do cartão
+    // ('outside' / 'outside:<lista>'), com a forma (Pix, débito…).
     const currentTarget = coll === 'cardTransactions' ? item.cardId : 'outside';
-    const target = patch.target || currentTarget;
+    const parsedTarget = parseTarget(patch.target || currentTarget);
+    const target = parsedTarget.outside ? 'outside' : parsedTarget.cardId;
+    if (parsedTarget.outside) {
+      clean.groupId = parsedTarget.groupId;
+      if (patch.method !== undefined) clean.method = patch.method || undefined;
+    }
+    const shared = Object.fromEntries(['description', 'category', 'amount', 'groupId', 'method']
+      .filter(k => k in clean && clean[k] !== item[k]).map(k => [k, clean[k]]));
+
     const targetColl = target === 'outside' ? 'otherExpenses' : 'cardTransactions';
     const moving = target !== currentTarget;
     // O lançamento no formato da coleção de destino.
@@ -424,7 +437,8 @@ export default function ExtratoApp({ spacesApi }) {
       const { visibleTo, coll: _c, ...rest } = x;
       return newVisibleTo ? { ...rest, visibleTo: newVisibleTo } : rest;
     };
-    const targetName = target === 'outside' ? 'fora do cartão'
+    const targetName = target === 'outside'
+      ? `${groups.find(g => g.id === clean.groupId)?.name || 'fora do cartão'}${clean.method ? ` (${methodLabel(clean.method)})` : ''}`
       : (c => (c ? (c.kind === 'payee' ? `Devo para ${c.name}` : `cartão ${c.name}`) : 'cartão'))(cards.find(c => c.id === target));
 
     if (scope === 'from') {
@@ -478,6 +492,26 @@ export default function ExtratoApp({ spacesApi }) {
     }
     setToast({ text: `“${clean.description}” agora é ${targetName}${items.length > 1 ? ` (${items.length} lançamentos)` : ''}.` });
   }
+  // Listas de gastos fora do cartão.
+  function renameGroup(id, name) {
+    const g = groups.find(x => x.id === id);
+    if (!g || !name.trim()) return;
+    write(store.set('expenseGroups', id, { name: name.trim(), order: g.order || 0 }));
+  }
+  function addGroup(name) {
+    if (!name.trim()) return;
+    write(store.set('expenseGroups', newId(), { name: name.trim(), order: Math.max(0, ...groups.map(g => Number(g.order) || 0)) + 1 }));
+    setToast({ text: `Lista “${name.trim()}” criada.` });
+  }
+  // Apagar uma lista não apaga gastos: eles voltam para a lista padrão.
+  function removeGroup(id) {
+    const g = groups.find(x => x.id === id);
+    if (!g || id === DEFAULT_GROUP) return;
+    for (const e of otherExpenses.filter(x => x.groupId === id)) write(store.update('otherExpenses', e, { groupId: DEFAULT_GROUP }));
+    write(store.remove('expenseGroups', id));
+    setToast({ text: `Lista “${g.name}” apagada; os gastos foram para “${groups[0].name}”.` });
+  }
+
   // Gasto fixo: marca o mês em `paidMonths`; os demais têm um `paid` só.
   function toggleOtherExpensePaid(id, month) {
     const e = otherExpenses.find(x => x.id === id);
@@ -704,7 +738,7 @@ export default function ExtratoApp({ spacesApi }) {
               cards={cards} people={people} cardTransactions={cardTransactions}
               filterPerson={filterPerson} selectedMonth={selectedMonth} expandedCard={expandedCard} setExpandedCard={setExpandedCard}
               onAddCard={addCard} onRemoveCard={removeCard} onUpdateCard={updateCard} onToggleInvoice={toggleInvoicePaid}
-              onNewEntry={openEntryForm} onRemoveTx={(t, scope) => removeEntry('cardTransactions', t, scope)} onUpdateTx={(t, patch, scope) => updateEntry('cardTransactions', t, patch, scope)} authorName={authorName} members={otherMembers} visibilityLabel={visibilityLabel}
+              onNewEntry={openEntryForm} onRemoveTx={(t, scope) => removeEntry('cardTransactions', t, scope)} onUpdateTx={(t, patch, scope) => updateEntry('cardTransactions', t, patch, scope)} authorName={authorName} members={otherMembers} visibilityLabel={visibilityLabel} groups={groups}
               personName={personName} personColor={personColor} cardGradients={pal.cardGradients} readOnly={readOnly}
               formOpen={cardFormOpen} setFormOpen={setCardFormOpen}
             />
@@ -712,20 +746,24 @@ export default function ExtratoApp({ spacesApi }) {
         )}
 
         {show('other') && (
-          <div id="sec-other" data-nav="sec-other" style={{ scrollMarginTop: '1rem' }}>
-            <OtherExpensesSection
-              expenses={otherExpenses} people={people} filterPerson={filterPerson} selectedMonth={selectedMonth}
-              cards={cards} onNewEntry={openEntryForm} onRemove={(e, scope) => removeEntry('otherExpenses', e, scope)} onUpdate={(e, patch, scope) => updateEntry('otherExpenses', e, patch, scope)} onTogglePaid={toggleOtherExpensePaid} authorName={authorName} members={otherMembers} visibilityLabel={visibilityLabel}
-              personName={personName} personColor={personColor} readOnly={readOnly}
-            />
+          <div id="sec-other" data-nav="sec-other" style={{ scrollMarginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+            {groups.map(g => (
+              <OtherExpensesSection key={g.id} group={g} isDefault={g.id === DEFAULT_GROUP}
+                expenses={otherExpenses.filter(e => groupOf(e, groupIds) === g.id)} people={people} filterPerson={filterPerson} selectedMonth={selectedMonth}
+                cards={cards} groups={groups} onNewEntry={openEntryForm} onRemove={(e, scope) => removeEntry('otherExpenses', e, scope)} onUpdate={(e, patch, scope) => updateEntry('otherExpenses', e, patch, scope)} onTogglePaid={toggleOtherExpensePaid} authorName={authorName} members={otherMembers} visibilityLabel={visibilityLabel}
+                personName={personName} personColor={personColor} readOnly={readOnly}
+                onRename={name => renameGroup(g.id, name)} onRemoveGroup={() => removeGroup(g.id)}
+              />
+            ))}
+            {!readOnly && <NewGroupButton onAdd={addGroup} />}
           </div>
         )}
 
-        {hasEntries && show('calendar') && (
-          <div id="sec-calendar" data-nav="sec-calendar" style={{ scrollMarginTop: '1rem' }}>
-            <CalendarSection bills={calendarBills} selectedMonth={selectedMonth} personName={personName} personColor={personColor}
-              onToggle={toggleBill} readOnly={readOnly} />
-          </div>
+        {hasEntries && show('payments') && (
+          <PaymentsSection
+            cards={cards} cardTransactions={cardTransactions} otherExpenses={otherExpenses}
+            filterPerson={filterPerson} selectedMonth={selectedMonth}
+          />
         )}
 
         {hasEntries && (show('categories') || show('summary')) && (
@@ -767,7 +805,7 @@ export default function ExtratoApp({ spacesApi }) {
 
       {entryForm && (
         <EntryForm
-          people={people} cards={cards} selectedMonth={selectedMonth} initialTarget={entryForm.target} defaultPersonId={myPerson?.id} members={otherMembers}
+          people={people} cards={cards} selectedMonth={selectedMonth} initialTarget={entryForm.target} defaultPersonId={myPerson?.id} members={otherMembers} groups={groups}
           personColor={personColor} onSubmit={submitEntry} onClose={() => setEntryForm(null)}
         />
       )}

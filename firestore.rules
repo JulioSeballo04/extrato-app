@@ -147,6 +147,12 @@ service cloud.firestore {
           && (!('endMonth' in d) || (d.endMonth is string && d.endMonth.matches('^[0-9]{4}-(0[1-9]|1[0-2])$')));
       }
 
+      // Fora do cartão: lista (id) e forma de pagamento.
+      function validOutside(d) {
+        return (!('groupId' in d) || isIdString(d.groupId))
+          && (!('method' in d) || d.method in ['pix', 'debito', 'boleto', 'dinheiro', 'transferencia']);
+      }
+
       // Quem lançou: ao criar, só pode ser quem está gravando; depois não muda.
       function validAuthor() {
         return request.method == 'create'
@@ -187,8 +193,9 @@ service cloud.firestore {
           && (resource == null || request.auth.uid in resource.data.visibleTo)
           && request.resource.data.keys().hasOnly(['coll', 'visibleTo', 'cardId', 'personId', 'description', 'amount', 'date',
                'fixed', 'category', 'installmentNumber', 'installmentTotal', 'installmentGroupId', 'splitGroupId', 'splitCount',
-               'paid', 'paidMonths', 'endMonth', 'createdBy'])
+               'paid', 'paidMonths', 'endMonth', 'createdBy', 'groupId', 'method'])
           && request.resource.data.coll in ['cardTransactions', 'otherExpenses']
+          && validOutside(request.resource.data)
           && (request.resource.data.coll != 'cardTransactions' || isIdString(request.resource.data.cardId))
           && (!('paidMonths' in request.resource.data) || isMonthList(request.resource.data.paidMonths))
           && request.resource.data.visibleTo is list
@@ -199,13 +206,25 @@ service cloud.firestore {
         allow delete: if canEdit(spaceId) && request.auth.uid in resource.data.visibleTo;
       }
 
+      // Listas de gastos fora do cartão ("default" é a "Outros gastos", renomeável).
+      match /expenseGroups/{id} {
+        allow read: if isMember(spaceId);
+        allow create, update: if canEdit(spaceId)
+          && request.resource.data.keys().hasOnly(['name', 'order'])
+          && request.resource.data.name is string
+          && request.resource.data.name.size() >= 1 && request.resource.data.name.size() <= 40
+          && request.resource.data.order is number;
+        allow delete: if canEdit(spaceId);
+      }
+
       match /otherExpenses/{id} {
         allow read: if isMember(spaceId);
         allow create, update: if canEdit(spaceId)
           && request.resource.data.keys().hasOnly(['personId', 'description', 'amount', 'date', 'fixed', 'category',
                'installmentNumber', 'installmentTotal', 'installmentGroupId', 'splitGroupId', 'splitCount', 'paid', 'paidMonths',
-               'endMonth', 'createdBy'])
+               'endMonth', 'createdBy', 'groupId', 'method'])
           && isMonthList(request.resource.data.paidMonths)
+          && validOutside(request.resource.data)
           && validEntry(request.resource.data)
           && validAuthor();
         allow delete: if canEdit(spaceId);
