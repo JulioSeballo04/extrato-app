@@ -3,7 +3,8 @@
 import React, { useEffect, useState } from 'react';
 import { CheckCheck, RotateCcw } from 'lucide-react';
 import { Dot, Sheet, MoneyInput } from '../ui';
-import { money, parseAmount, fmtDate, sumAmounts, isRecurring, shownDate } from '../../lib/ledger';
+import { SortPicker, savedSort, rememberSort } from './Entries';
+import { money, parseAmount, fmtDate, sumAmounts, isRecurring, shownDate, sortEntries } from '../../lib/ledger';
 
 // "Conferir planilha": checklist da fatura do mês para a pessoa ir marcando,
 // com a fatura do banco aberta ao lado, cada lançamento que aparece lá. Opcional:
@@ -18,12 +19,20 @@ export default function InvoiceCheck({ card, items, selectedMonth, title, person
     storeCheck(key, next);
   }
 
-  // Na ordem da fatura do banco: data mais antiga primeiro.
-  const list = [...items].sort((a, b) => {
-    const da = shownDate(a, selectedMonth, card);
-    const db = shownDate(b, selectedMonth, card);
-    return da !== db ? (da < db ? -1 : 1) : String(a.description).localeCompare(String(b.description), 'pt-BR');
-  });
+  // Ordem escolhida (lembrada no aparelho). "Data" aqui vai da mais antiga para
+  // a mais nova, como na fatura do banco; valor e parcelas recentes, como na lista.
+  const [sort, setSort] = useState(() => savedSort('conferir', 'date'));
+  function chooseSort(k) {
+    setSort(k);
+    rememberSort('conferir', k);
+  }
+  const list = sort === 'date'
+    ? [...items].sort((a, b) => {
+      const da = shownDate(a, selectedMonth, card);
+      const db = shownDate(b, selectedMonth, card);
+      return da !== db ? (da < db ? -1 : 1) : String(a.description).localeCompare(String(b.description), 'pt-BR');
+    })
+    : sortEntries(items, sort, selectedMonth, () => card);
   // Ignora marcações de lançamentos que já não estão nesta fatura (apagados, editados).
   const checked = new Set(saved.ids.filter(id => list.some(t => t.id === id)));
   const total = sumAmounts(list);
@@ -63,6 +72,7 @@ export default function InvoiceCheck({ card, items, selectedMonth, title, person
         <div style={{ height: '100%', width: `${list.length ? (checked.size / list.length) * 100 : 0}%`, background: 'var(--success)', transition: 'width 0.2s' }} />
       </div>
 
+      {list.length > 1 && <SortPicker sort={sort} onChange={chooseSort} />}
       {list.length === 0 && <p className="muted">Nada lançado nesta fatura.</p>}
       <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
         {list.map(t => {
