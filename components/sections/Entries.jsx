@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { Pencil, Trash2, Check, ChevronDown, EyeOff } from 'lucide-react';
 import { Dot, Tag, Sheet, MoneyInput } from '../ui';
-import { CATEGORIES, DEFAULT_CATEGORY, money, parseAmount, amountInput, fmtDate, isRecurring, defaultDateFor, dueDateIn, changeScopes, splitAmount, PAYMENT_METHODS, methodLabel, parseTarget, outsideTarget, DEFAULT_GROUP } from '../../lib/ledger';
+import { CATEGORIES, DEFAULT_CATEGORY, money, parseAmount, amountInput, fmtDate, isRecurring, defaultDateFor, dueDateIn, changeScopes, splitAmount, purchasePlan, PAYMENT_METHODS, methodLabel, parseTarget, outsideTarget, DEFAULT_GROUP } from '../../lib/ledger';
 
 export const OUTSIDE_CARD = 'outside';
 
@@ -22,39 +22,82 @@ export function EntryForm({ people, cards, selectedMonth, initialTarget, onSubmi
   const [installments, setInstallments] = useState('1');
   const [paidInstallments, setPaidInstallments] = useState('0');
   const [splitWith, setSplitWith] = useState([]);
+  // Divisão em partes iguais ou com o valor de cada um (ex.: eu 36, a Sofia 14).
+  const [splitMode, setSplitMode] = useState('equal');
+  const [shareInputs, setShareInputs] = useState({}); // personId → texto do valor
+  // Entrada: parte já paga à parte (ex.: 30 no Pix); o resto vai para "Onde".
+  const [down, setDown] = useState('');
+  const [downMethod, setDownMethod] = useState('pix');
   const [showMore, setShowMore] = useState(false);
   const [hideFrom, setHideFrom] = useState([]); // membros que não vão ver (ex.: presente)
   const [errors, setErrors] = useState({});
 
   const installmentsNum = Math.max(1, Math.floor(Number(installments)) || 1);
   const paidNum = Math.min(installmentsNum, Math.max(0, Math.floor(Number(paidInstallments)) || 0));
-  const splitCount = 1 + splitWith.filter(id => id !== personId).length;
+  const participants = [personId, ...splitWith.filter(id => id !== personId)];
+  const splitCount = participants.length;
+  const custom = splitCount > 1 && splitMode === 'custom';
   const value = parseAmount(amount);
-  // Mesmos centavos que serão gravados (ver splitAmount): podem variar 1 centavo.
-  const parts = splitAmount(value, splitCount).flatMap(share => splitAmount(share, installmentsNum));
+  const downValue = parseAmount(down);
+  const hasDown = downValue > 0;
+  const shares = custom ? participants.map(id => parseAmount(shareInputs[id] || '')) : null;
+  const sharesLeft = custom ? Math.round((value - shares.reduce((a, b) => a + b, 0)) * 100) / 100 : 0;
+  // Mesmos centavos que serão gravados (ver purchasePlan): podem variar 1 centavo.
+  const plan = purchasePlan({ amount: value, people: splitCount, shares, installments: installmentsNum, down: hasDown ? downValue : 0 });
+  const parts = plan.parts.flat();
   const minPart = Math.min(...parts);
   const maxPart = Math.max(...parts);
+  const restValue = Math.round((value - (hasDown ? downValue : 0)) * 100) / 100;
+  const isFixed = installmentsNum === 1 && fixed && !hasDown;
 
   function choosePerson(id) {
     setPersonId(id);
     setSplitWith(prev => prev.filter(x => x !== id));
+  }
+  function chooseSplitMode(mode) {
+    setSplitMode(mode);
+    setErrors(x => ({ ...x, split: null }));
+    // Começa das partes iguais, para só ajustar.
+    if (mode === 'custom' && value > 0) {
+      const equal = splitAmount(value, splitCount);
+      setShareInputs(Object.fromEntries(participants.map((id, i) => [id, amountInput(equal[i])])));
+    }
+  }
+  function setShare(id, text) {
+    setErrors(x => ({ ...x, split: null }));
+    setShareInputs(prev => {
+      const next = { ...prev, [id]: text };
+      // Entre duas pessoas, a outra fica com o que falta.
+      if (participants.length === 2 && value > 0) {
+        const other = participants.find(x => x !== id);
+        const rest = Math.round((value - parseAmount(text)) * 100) / 100;
+        next[other] = rest >= 0 ? amountInput(rest) : '';
+      }
+      return next;
+    });
   }
 
   function submit(e) {
     e.preventDefault();
     const nextErrors = {};
     if (!(value > 0)) nextErrors.amount = 'Informe um valor maior que zero.';
+    else if (hasDown && downValue >= value) nextErrors.down = 'A entrada precisa ser menor que o valor total.';
+    else if (custom && shares.some(s => !(s > 0))) nextErrors.split = 'Informe um valor maior que zero para cada pessoa.';
+    else if (custom && sharesLeft !== 0) nextErrors.split = sharesLeft > 0 ? `Faltam ${money(sharesLeft)} para fechar o total.` : `As partes passam ${money(-sharesLeft)} do total.`;
     else if (minPart <= 0) nextErrors.amount = `Valor pequeno demais para ${parts.length} partes (alguma ficaria com R$ 0,00).`;
     if (!desc.trim()) nextErrors.desc = 'Descreva o gasto (ex.: mercado, aluguel).';
     if (!personId) nextErrors.person = 'Escolha quem gastou.';
+    if ((nextErrors.down || nextErrors.split) && !showMore) setShowMore(true);
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length) return;
     const where = parseTarget(target);
     if (where.outside) rememberMethod(method);
     onSubmit(where.outside ? null : where.cardId, {
       ...(where.outside ? { groupId: where.groupId, method } : {}),
-      description: desc, amount: value, personId, date, category, fixed: installmentsNum === 1 && fixed,
-      installments: installmentsNum, paidInstallments: paidNum, splitWith: splitWith.filter(id => id !== personId), hideFrom,
+      description: desc, amount: value, personId, date, category, fixed: isFixed,
+      installments: installmentsNum, paidInstallments: paidNum, splitWith: participants.slice(1), hideFrom,
+      ...(custom ? { shares } : {}),
+      ...(hasDown ? { down: downValue, downMethod } : {}),
     });
   }
 
@@ -111,7 +154,7 @@ export function EntryForm({ people, cards, selectedMonth, initialTarget, onSubmi
 
         <button type="button" className="ghost" onClick={() => setShowMore(s => !s)} aria-expanded={showMore} style={{ alignSelf: 'flex-start' }}>
           <ChevronDown size={14} style={{ transform: showMore ? 'rotate(180deg)' : 'none' }} />
-          Mais opções (parcelas, fixo, dividir{members.length > 0 ? ', esconder' : ''})
+          Mais opções (parcelas, entrada, fixo, dividir{members.length > 0 ? ', esconder' : ''})
         </button>
 
         {showMore && (
@@ -127,8 +170,16 @@ export function EntryForm({ people, cards, selectedMonth, initialTarget, onSubmi
                   onChange={e => setPaidInstallments(e.target.value)} disabled={installmentsNum === 1} />
               </label>
             </div>
-            <label className="label-sm" style={{ cursor: installmentsNum > 1 ? 'not-allowed' : 'pointer' }}>
-              <input type="checkbox" checked={fixed && installmentsNum === 1} disabled={installmentsNum > 1} onChange={e => setFixed(e.target.checked)} />
+            <div className="field" role="group" aria-label="Entrada">
+              <label className="field">
+                Entrada já paga à parte (opcional)
+                <MoneyInput value={down} onChange={v => { setDown(v); setErrors(x => ({ ...x, down: null })); }} aria-invalid={!!errors.down} />
+              </label>
+              {errors.down && <span style={{ color: 'var(--danger)' }}>{errors.down}</span>}
+              {hasDown && <MethodPicker method={downMethod} setMethod={m => setDownMethod(m || 'pix')} label="Entrada paga com" />}
+            </div>
+            <label className="label-sm" style={{ cursor: installmentsNum > 1 || hasDown ? 'not-allowed' : 'pointer' }}>
+              <input type="checkbox" checked={isFixed} disabled={installmentsNum > 1 || hasDown} onChange={e => setFixed(e.target.checked)} />
               Gasto fixo (repete todo mês, ex.: aluguel, assinatura)
             </label>
             {members.length > 0 && (
@@ -136,25 +187,51 @@ export function EntryForm({ people, cards, selectedMonth, initialTarget, onSubmi
             )}
             {people.length > 1 && (
               <div className="field" role="group" aria-label="Dividir com">
-                Dividir igualmente com
+                Dividir com
                 <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
                   {people.filter(p => p.id !== personId).map(p => (
                     <PersonChip key={p.id} person={p} color={personColor(p.id)} pressed={splitWith.includes(p.id)}
-                      onClick={() => setSplitWith(prev => prev.includes(p.id) ? prev.filter(x => x !== p.id) : [...prev, p.id])} />
+                      onClick={() => { setErrors(x => ({ ...x, split: null })); setSplitWith(prev => prev.includes(p.id) ? prev.filter(x => x !== p.id) : [...prev, p.id]); }} />
                   ))}
                 </div>
+                {splitCount > 1 && (
+                  <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginTop: '0.2rem' }} role="group" aria-label="Como dividir">
+                    <button type="button" className="chip" aria-pressed={splitMode === 'equal'} onClick={() => chooseSplitMode('equal')}>Partes iguais</button>
+                    <button type="button" className="chip" aria-pressed={splitMode === 'custom'} onClick={() => chooseSplitMode('custom')}>Valor de cada um</button>
+                  </div>
+                )}
+                {custom && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.2rem' }}>
+                    {participants.map(id => {
+                      const p = people.find(x => x.id === id);
+                      return (
+                        <label key={id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          <span style={{ flex: 1, display: 'inline-flex', alignItems: 'center', gap: 6 }}><Dot color={personColor(id)} />{p?.name}</span>
+                          <MoneyInput value={shareInputs[id] || ''} onChange={v => setShare(id, v)} aria-label={`Parte de ${p?.name}`} style={{ maxWidth: 150 }} />
+                        </label>
+                      );
+                    })}
+                    {value > 0 && sharesLeft !== 0 && !errors.split && (
+                      <span className="hint">{sharesLeft > 0 ? `Faltam ${money(sharesLeft)}` : `Passou ${money(-sharesLeft)}`} para fechar {money(value)}.</span>
+                    )}
+                  </div>
+                )}
+                {errors.split && <span style={{ color: 'var(--danger)' }}>{errors.split}</span>}
               </div>
             )}
           </div>
         )}
 
-        {value > 0 && (installmentsNum > 1 || splitCount > 1) && (
+        {value > 0 && (installmentsNum > 1 || splitCount > 1 || hasDown) && (!custom || sharesLeft === 0) && (!hasDown || downValue < value) && (
           <p className="hint" role="status">
-            Vai gerar {installmentsNum * splitCount} lançamento{installmentsNum * splitCount > 1 ? 's' : ''} de <strong className="mono">{minPart === maxPart ? money(maxPart) : `${money(minPart)} a ${money(maxPart)}`}</strong>
+            {hasDown && <>Entrada de <strong className="mono">{money(downValue)}</strong> ({methodLabel(downMethod)}, já paga) em “{groups.find(g => g.id === DEFAULT_GROUP)?.name || 'Outros gastos'}”; o resto, <strong className="mono">{money(restValue)}</strong>, </>}
+            {hasDown ? 'vai gerar' : 'Vai gerar'} {installmentsNum * splitCount} lançamento{installmentsNum * splitCount > 1 ? 's' : ''} de <strong className="mono">{minPart === maxPart ? money(maxPart) : `${money(minPart)} a ${money(maxPart)}`}</strong>
             {installmentsNum > 1 && (paidNum > 0
               ? <>: {paidNum} já paga{paidNum > 1 ? 's' : ''} (antes de {fmtDate(date)}) e {installmentsNum - paidNum} a partir de {fmtDate(date)}, uma por mês</>
               : <>, uma parcela por mês a partir de {fmtDate(date)}</>)}
-            {splitCount > 1 && <>, divididos entre {splitCount} pessoas</>}.
+            {splitCount > 1 && (custom
+              ? <>, divididos assim: {participants.map((id, i) => `${people.find(x => x.id === id)?.name} ${money(plan.shares[i])}`).join(', ')}</>
+              : <>, divididos entre {splitCount} pessoas</>)}.
           </p>
         )}
 
@@ -226,7 +303,7 @@ export function EntryList({ items, people, cards = [], groups = [], members = []
               {isRecurring(t) && <Tag tone="accent">Fixo</Tag>}
               {t.installmentTotal > 1 && <Tag tone="info" mono title="Parcela">{t.installmentNumber}/{t.installmentTotal}</Tag>}
               {!t.cardId && methodLabel(t.method) && <Tag title="Forma de pagamento">{methodLabel(t.method)}</Tag>}
-              {t.splitGroupId && <Tag title={`Dividido entre ${t.splitCount} pessoas`}>Dividido ÷{t.splitCount}</Tag>}
+              {t.splitGroupId && <Tag title={`Dividido entre ${t.splitCount} pessoas`}>Dividido em {t.splitCount}</Tag>}
               {visibilityLabel?.(t) && (
                 <span className="tag" title="Os membros listados não veem este lançamento" style={{ color: 'var(--accent-light)', border: '1px solid var(--accent)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                   <EyeOff size={11} aria-hidden="true" />{visibilityLabel(t)}
@@ -295,7 +372,7 @@ function EditRow({ item, people, cards, groups = [], members = [], purchaseInfo,
   const setPlanField = p => { setError(''); setPlan(x => ({ ...x, ...p })); };
   const planCount = Math.max(1, Math.floor(Number(plan.count)) || 1);
   const planCurrent = Math.min(planCount, Math.max(1, Math.floor(Number(plan.current)) || 1));
-  const planEach = parseAmount(plan.total) / (info?.people.length || 1) / planCount;
+  const planEach = parseAmount(plan.total) / (info?.uneven ? 1 : info?.people.length || 1) / planCount;
   const targetCard = cards.find(c => c.id === draft.target);
   const realCards = cards.filter(c => c.kind !== 'payee');
   const payees = cards.filter(c => c.kind === 'payee');
@@ -386,7 +463,7 @@ function EditRow({ item, people, cards, groups = [], members = [], purchaseInfo,
               </div>
               <p className="hint" style={{ margin: '0.5rem 0 0' }}>
                 {planCount > 1
-                  ? <>Vai refazer a compra em <strong>{planCount}x</strong> de <strong className="mono">{money(planEach)}</strong>{info.people.length > 1 ? ` por pessoa (dividida entre ${info.people.length})` : ''}: esta linha vira a parcela {planCurrent}/{planCount} em {fmtDate(draft.date)}{planCurrent > 1 ? `, e as ${planCurrent - 1} anteriores ficam como já pagas` : ''}.</>
+                  ? <>Vai refazer a compra em <strong>{planCount}x</strong> de <strong className="mono">{money(planEach)}</strong>{info.people.length > 1 ? (info.uneven ? ` no total (dividida entre ${info.people.length}, na mesma proporção de hoje)` : ` por pessoa (dividida entre ${info.people.length})`) : ''}: esta linha vira a parcela {planCurrent}/{planCount} em {fmtDate(draft.date)}{planCurrent > 1 ? `, e as ${planCurrent - 1} anteriores ficam como já pagas` : ''}.</>
                   : <>Vai virar uma compra à vista de <strong className="mono">{money(parseAmount(plan.total))}</strong>.</>}
                 {' '}As parcelas atuais são substituídas (dá para desfazer).
               </p>
@@ -454,10 +531,10 @@ function TargetGroupOptions({ groups }) {
 }
 
 // Forma de pagamento fora do cartão (o crédito é lançar num cartão).
-function MethodPicker({ method, setMethod }) {
+function MethodPicker({ method, setMethod, label = 'Forma de pagamento' }) {
   return (
-    <div className="field" role="group" aria-label="Forma de pagamento">
-      Forma de pagamento
+    <div className="field" role="group" aria-label={label}>
+      {label}
       <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
         {PAYMENT_METHODS.map(m => (
           <button key={m.key} type="button" className="chip" aria-pressed={method === m.key}

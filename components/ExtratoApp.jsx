@@ -9,7 +9,7 @@ import { BRAND } from '../lib/brand';
 import { PALETTES, AUTO_PALETTE, DEFAULT_PALETTE, resolvePaletteKey, paletteVars, writeCachedPalette, systemPrefersDark } from '../lib/theme';
 import {
   DEFAULT_CATEGORY, money, monthLabel, capitalize, currentMonth, shiftMonth, monthsLaterDate, matchesMonth, isRecurring, isPaidIn,
-  isInvoicePaid, parseDueDay, sumAmounts, buildMonthBills, isPayee, DEFAULT_GROUP, groupOf, parseTarget, methodLabel, splitAmount, entriesInScope, dueDateIn,
+  isInvoicePaid, parseDueDay, sumAmounts, buildMonthBills, isPayee, DEFAULT_GROUP, groupOf, parseTarget, methodLabel, splitAmount, splitByWeights, purchasePlan, entriesInScope, dueDateIn,
 } from '../lib/ledger';
 import { APP_CSS } from './appStyles';
 import { Toast } from './ui';
@@ -325,12 +325,14 @@ export default function ExtratoApp({ spacesApi }) {
     const total = Math.max(1, Math.floor(Number(entry.installments)) || 1);
     const paidCount = Math.min(total, Math.max(0, Math.floor(Number(entry.paidInstallments)) || 0));
     const groupId = newId();
-    // Divide o valor igualmente entre o responsável principal e quem mais
-    // estiver marcado em "dividir com" (ex.: consórcio dividido com a namorada).
+    // Divide o valor entre o responsável principal e quem mais estiver marcado
+    // em "dividir com" (ex.: consórcio dividido com a namorada): em partes iguais
+    // ou com o valor de cada um (`entry.shares`, na mesma ordem).
     const participants = [entry.personId, ...((entry.splitWith || []).filter(id => id && id !== entry.personId))];
     const splitGroupId = participants.length > 1 ? newId() : undefined;
+    const own = entry.shares?.length === participants.length ? entry.shares : splitAmount(entry.amount, participants.length);
     // Centavos inteiros que somam exatamente o total: por pessoa e depois por parcela.
-    const shares = splitAmount(entry.amount, participants.length).map(share => splitAmount(share, total));
+    const shares = own.map(share => splitAmount(share, total));
     // A data informada é a da PRÓXIMA parcela a vencer (nº paidCount+1).
     // As parcelas já pagas ficam com datas retroativas; as futuras seguem em frente a partir dela.
     return participants.flatMap((personId, p) =>
@@ -356,13 +358,25 @@ export default function ExtratoApp({ spacesApi }) {
     if (!entry.description.trim() || !entry.personId) return;
     const visibleTo = visibleToFor(entry.hideFrom);
     const extra = visibleTo ? { visibleTo } : {};
-    if (cardId) write(store.setMany('cardTransactions', buildEntries(entry, { cardId, ...extra })));
-    else write(store.setMany('otherExpenses', buildEntries(entry, { ...extra, groupId: entry.groupId || DEFAULT_GROUP, ...(entry.method ? { method: entry.method } : {}) })));
+    // Entrada (ex.: 30 no Pix de uma compra de 130): vira um gasto já pago fora
+    // do cartão, dividido na mesma proporção; o resto segue para o cartão/lista.
+    const down = Number(entry.down) > 0 && Number(entry.down) < entry.amount ? Number(entry.down) : 0;
+    const plan = purchasePlan({ amount: entry.amount, people: 1 + (entry.splitWith || []).length, shares: entry.shares, down });
+    const rest = { ...entry, amount: Math.round((entry.amount - down) * 100) / 100, shares: plan.restShares };
+    if (cardId) write(store.setMany('cardTransactions', buildEntries(rest, { cardId, ...extra })));
+    else write(store.setMany('otherExpenses', buildEntries(rest, { ...extra, groupId: entry.groupId || DEFAULT_GROUP, ...(entry.method ? { method: entry.method } : {}) })));
+    if (down) {
+      write(store.setMany('otherExpenses', buildEntries({
+        ...entry, description: `${entry.description.trim()} (entrada)`, amount: down, shares: plan.downShares,
+        fixed: false, installments: 1, paidInstallments: 0,
+      }, { ...extra, groupId: DEFAULT_GROUP, ...(entry.downMethod ? { method: entry.downMethod } : {}) }).map(x => ({ ...x, paid: true }))));
+    }
     setEntryForm(null);
     const entryMonth = entry.date.slice(0, 7);
+    const what = down ? `Gasto lançado, com entrada de ${money(down)}` : 'Gasto lançado';
     setToast(entryMonth === selectedMonth
-      ? { text: 'Gasto lançado.' }
-      : { text: `Gasto lançado em ${monthLabel(entryMonth)}.`, action: { label: 'Ir para o mês', run: () => setSelectedMonth(entryMonth) } });
+      ? { text: `${what}.` }
+      : { text: `${what} em ${monthLabel(entryMonth)}.`, action: { label: 'Ir para o mês', run: () => setSelectedMonth(entryMonth) } });
   }
   const entriesOf = coll => (coll === 'cardTransactions' ? cardTransactions : otherExpenses);
 
@@ -406,17 +420,22 @@ export default function ExtratoApp({ spacesApi }) {
   function purchaseInfo(item) {
     const coll = item.cardId ? 'cardTransactions' : 'otherExpenses';
     const all = entriesInScope(entriesOf(coll), item, 'all');
+    const people = [...new Set([item.personId, ...all.map(x => x.personId)])];
+    // Quanto é de cada pessoa (a divisão pode ser com valores diferentes).
+    const personTotals = people.map(id => Math.round(sumAmounts(all.filter(x => x.personId === id)) * 100) / 100);
     return {
       total: Math.round(sumAmounts(all) * 100) / 100,
       count: item.installmentTotal > 1 ? item.installmentTotal : 1,
       current: item.installmentTotal > 1 ? item.installmentNumber : 1,
-      people: [...new Set([item.personId, ...all.map(x => x.personId)])],
+      people, personTotals,
+      uneven: personTotals.some(v => Math.abs(v - personTotals[0]) > 0.01 * people.length),
     };
   }
 
   // Refaz a compra com outro parcelamento: apaga as parcelas antigas e gera as
   // novas (esta linha vira a parcela `current`, na mesma data; as anteriores
-  // ficam como já pagas). Mantém quem divide, cartão/lista, forma e ocultação.
+  // ficam como já pagas). Mantém quem divide (na mesma proporção), cartão/lista,
+  // forma e ocultação.
   function rebuildPurchase(coll, item, patch) {
     const old = entriesInScope(entriesOf(coll), item, 'all');
     const info = purchaseInfo(item);
@@ -432,6 +451,7 @@ export default function ExtratoApp({ spacesApi }) {
       amount: total,
       personId: info.people[0],
       splitWith: info.people.slice(1),
+      ...(info.uneven ? { shares: splitByWeights(total, info.personTotals) } : {}),
       date: patch.date || item.date,
       category: patch.category || item.category,
       fixed: false,
@@ -441,7 +461,7 @@ export default function ExtratoApp({ spacesApi }) {
     write(store.removeMany(old.map(x => [coll, x.id])));
     write(store.setMany(coll, fresh));
     setToast({
-      text: `“${item.description}” refeito: ${count > 1 ? `${count}x de ${money(total / info.people.length / count)}` : `à vista, ${money(total)}`}.`,
+      text: `“${item.description}” refeito: ${count > 1 ? `${count}x de ${money(total / (info.uneven ? 1 : info.people.length) / count)}${info.uneven ? ' no total' : ''}` : `à vista, ${money(total)}`}.`,
       action: { label: 'Desfazer', run: () => { write(store.removeMany(fresh.map(x => [coll, x.id]))); write(store.setMany(coll, old.map(ownAuthor))); } },
     });
   }
