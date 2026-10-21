@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { Pencil, Trash2, Check, ChevronDown, EyeOff, ArrowDownUp } from 'lucide-react';
 import { Dot, Tag, Sheet, MoneyInput } from '../ui';
-import { CATEGORIES, DEFAULT_CATEGORY, money, parseAmount, amountInput, fmtDate, isRecurring, defaultDateFor, changeScopes, splitAmount, purchasePlan, PAYMENT_METHODS, methodLabel, parseTarget, outsideTarget, DEFAULT_GROUP, ENTRY_SORTS, sortEntries, shownDate } from '../../lib/ledger';
+import { CATEGORIES, DEFAULT_CATEGORY, money, parseAmount, amountInput, fmtDate, isRecurring, defaultDateFor, changeScopes, splitAmount, purchasePlan, PAYMENT_METHODS, methodLabel, parseTarget, outsideTarget, DEFAULT_GROUP, ENTRY_SORTS, sortEntries, shownDate, isPayee, invoiceKeyOf, invoiceDueDate, invoiceName, monthLabel } from '../../lib/ledger';
 
 export const OUTSIDE_CARD = 'outside';
 
@@ -151,6 +151,7 @@ export function EntryForm({ people, cards, selectedMonth, initialTarget, onSubmi
             </select>
           </label>
         </div>
+        <InvoiceHint card={outside ? null : cards.find(c => c.id === target)} date={date} />
 
         <button type="button" className="ghost" onClick={() => setShowMore(s => !s)} aria-expanded={showMore} style={{ alignSelf: 'flex-start' }}>
           <ChevronDown size={14} style={{ transform: showMore ? 'rotate(180deg)' : 'none' }} />
@@ -336,6 +337,20 @@ export function EntryList({ items, people, cards = [], groups = [], members = []
         )
       ))}
     </div>
+  );
+}
+
+// Em qual fatura a compra vai cair, para não haver surpresa com o fechamento
+// (ex.: comprar no "melhor dia" já joga a compra para a fatura seguinte).
+function InvoiceHint({ card, date }) {
+  if (!card || isPayee(card) || !date) return null;
+  const key = invoiceKeyOf(card, date);
+  const due = invoiceDueDate(card, key);
+  return (
+    <p className="hint" role="status" style={{ marginTop: '-0.4rem' }}>
+      Vai para a fatura de <strong>{invoiceName(card, key)}</strong>{due && <> (vence {fmtDate(due)})</>}, nos gastos de {monthLabel(key)}.
+      {!card.closeDay && ' Este cartão não tem dia de fechamento: vale o mês da data.'}
+    </p>
   );
 }
 

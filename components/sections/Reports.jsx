@@ -3,11 +3,12 @@
 import React, { useState } from 'react';
 import { Printer } from 'lucide-react';
 import { Dot } from '../ui';
-import { DEFAULT_CATEGORY, money, fmtDate, monthLabel, matchesMonth, isRecurring } from '../../lib/ledger';
+import { DEFAULT_CATEGORY, money, fmtDate, monthLabel, matchesMonth, isRecurring, entryInMonth, cardFinder } from '../../lib/ledger';
 
-export function CategorySummarySection({ cardTransactions, otherExpenses, filterPerson, selectedMonth, categoryColors }) {
+export function CategorySummarySection({ cards, cardTransactions, otherExpenses, filterPerson, selectedMonth, categoryColors }) {
+  const cardOf = cardFinder(cards);
   const all = [...cardTransactions, ...otherExpenses].filter(t =>
-    matchesMonth(t, selectedMonth) && (filterPerson === 'all' || t.personId === filterPerson)
+    entryInMonth(t, selectedMonth, cardOf) && (filterPerson === 'all' || t.personId === filterPerson)
   );
   const totals = {};
   let grandTotal = 0;
@@ -97,6 +98,7 @@ export function SummarySection({ people, personTotal, personColor, selectedMonth
 
 export function ReportSection({ people, cards, cardTransactions, otherExpenses, selectedMonth, personTotal, personColor }) {
   const [target, setTarget] = useState('all');
+  const cardOf = cardFinder(cards);
 
   function cardName(id) {
     const c = cards.find(c => c.id === id);
@@ -106,7 +108,7 @@ export function ReportSection({ people, cards, cardTransactions, otherExpenses, 
 
   function movementsFor(personId) {
     const cardMoves = cardTransactions
-      .filter(t => t.personId === personId && matchesMonth(t, selectedMonth))
+      .filter(t => t.personId === personId && entryInMonth(t, selectedMonth, cardOf))
       .map(t => ({ ...t, source: cardName(t.cardId) }));
     const otherMoves = otherExpenses
       .filter(t => t.personId === personId && matchesMonth(t, selectedMonth))
