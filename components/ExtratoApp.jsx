@@ -199,16 +199,19 @@ export default function ExtratoApp({ spacesApi }) {
 
   // Conta ↔ pessoa: qual pessoa da lista é quem está usando o app.
   const myPerson = people.find(p => p.uid === user?.uid) || null;
-  // Espaço só seu: o topo (resumo e contas) mostra só os seus gastos e não há
-  // "Ver gastos de". Compartilhado: aparecem todos, com o seletor.
-  // Sem pessoa ligada à conta, vale a criada junto com a conta ou a que tem o
-  // primeiro nome da conta.
-  const isShared = (space?.members?.length || 0) > 1;
+  // O topo (resumo e contas do mês) mostra só os gastos de quem usa o app: você
+  // e quem entrou no espaço pelo código (pessoas ligadas a um membro). As
+  // pessoas só cadastradas (sem conta) ficam de fora; "Ver gastos de" filtra
+  // as listas abaixo. Sem pessoa ligada à sua conta, vale a criada junto com a
+  // conta ou a que tem o primeiro nome da conta.
   const firstName = (user?.displayName || '').trim().split(/\s+/)[0].toLowerCase();
   const me = myPerson || people.find(p => p.id === `p_${user?.uid}`)
     || (firstName ? people.find(p => p.name.trim().toLowerCase() === firstName) : null);
-  const topPerson = !isShared && me ? me.id : filterPerson;
-  const inScope = t => topPerson === 'all' || t.personId === topPerson;
+  const topIds = new Set([
+    ...(me ? [me.id] : []),
+    ...people.filter(p => p.uid && (space?.members || []).includes(p.uid)).map(p => p.id),
+  ]);
+  const inScope = t => topIds.size === 0 || topIds.has(t.personId);
   const monthBills = buildMonthBills(data, selectedMonth, inScope);
   const calendarBills = monthBills; // só contas com valor (sem faturas de R$ 0,00)
   function toggleBill(bill) {
@@ -218,19 +221,13 @@ export default function ExtratoApp({ spacesApi }) {
   const billsPaidCount = monthBills.filter(b => b.paid).length;
   const billsOverdue = monthBills.filter(b => b.status === 'overdue').length;
 
-  // Números do topo (respeitam o filtro de pessoa).
-  const scopePeople = topPerson === 'all' ? people : people.filter(p => p.id === topPerson);
+  const scopePeople = topIds.size === 0 ? people : people.filter(p => topIds.has(p.id));
   const overview = scopePeople.reduce((acc, p) => {
     const t = personTotal(p.id, selectedMonth);
     acc.cardSum += t.cardSum; acc.otherSum += t.otherSum;
     acc.salary += Number(p.salary) || 0;
     return acc;
   }, { cardSum: 0, otherSum: 0, salary: 0 });
-  // "Ver gastos de": só quem tem salário cadastrado.
-  const salariedPeople = people.filter(p => (Number(p.salary) || 0) > 0);
-  // Se o salário de quem está filtrado for apagado, o botão some: volta para "Todos".
-  const filterStillValid = filterPerson === 'all' || salariedPeople.some(p => p.id === filterPerson);
-  useEffect(() => { if (!filterStillValid) setFilterPerson('all'); }, [filterStillValid]);
   const billsPaid = sumAmounts(monthBills.filter(b => b.paid));
   const billsTotal = sumAmounts(monthBills);
 
@@ -762,22 +759,11 @@ export default function ExtratoApp({ spacesApi }) {
           )}
         </div>
 
-        {(isShared || !me) && people.length > 1 && salariedPeople.length > 0 && (
-          <div className="no-print" role="group" aria-label="Ver gastos de" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
-            <span className="hint" style={{ marginRight: '0.2rem' }}>Ver gastos de</span>
-            <button className="chip" aria-pressed={filterPerson === 'all'} onClick={() => setFilterPerson('all')}>Todos</button>
-            {salariedPeople.map(p => (
-              <PersonChip key={p.id} person={p} color={personColor(p.id)} pressed={filterPerson === p.id}
-                onClick={() => setFilterPerson(filterPerson === p.id ? 'all' : p.id)} />
-            ))}
-          </div>
-        )}
-
         {openPanel === 'bills' && (
           <BillsPanel
             bills={monthBills} selectedMonth={selectedMonth} onToggle={toggleBill} onClose={() => setOpenPanel(null)}
             personName={personName} personColor={personColor} readOnly={readOnly}
-            filterLabel={topPerson === 'all' ? null : personName(topPerson)}
+            filterLabel={topIds.size === 0 || topIds.size === people.length ? null : scopePeople.map(p => p.name).join(', ')}
           />
         )}
         {openPanel === 'space' && (
@@ -833,11 +819,23 @@ export default function ExtratoApp({ spacesApi }) {
           />
         )}
 
+        {/* "Ver gastos de": filtra os cartões, as pessoas a pagar e os outros gastos abaixo. */}
+        {people.length > 1 && hasEntries && (
+          <div className="no-print" role="group" aria-label="Ver gastos de" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap', marginBottom: '-1rem' }}>
+            <span className="hint" style={{ marginRight: '0.2rem' }}>Ver gastos de</span>
+            <button className="chip" aria-pressed={filterPerson === 'all'} onClick={() => setFilterPerson('all')}>Todos</button>
+            {people.map(p => (
+              <PersonChip key={p.id} person={p} color={personColor(p.id)} pressed={filterPerson === p.id}
+                onClick={() => setFilterPerson(filterPerson === p.id ? 'all' : p.id)} />
+            ))}
+          </div>
+        )}
+
         {show('cards') && (
           <div id="sec-cards" data-nav="sec-cards" style={{ scrollMarginTop: '1rem' }}>
             <CardsSection
               cards={cards} people={people} cardTransactions={cardTransactions}
-              filterPerson="all" selectedMonth={selectedMonth} expandedCard={expandedCard} setExpandedCard={setExpandedCard}
+              filterPerson={filterPerson} selectedMonth={selectedMonth} expandedCard={expandedCard} setExpandedCard={setExpandedCard}
               onAddCard={addCard} onRemoveCard={removeCard} onUpdateCard={updateCard} onToggleInvoice={toggleInvoicePaid}
               onNewEntry={openEntryForm} onRemoveTx={(t, scope) => removeEntry('cardTransactions', t, scope)} onUpdateTx={(t, patch, scope) => updateEntry('cardTransactions', t, patch, scope)} purchaseInfo={purchaseInfo} authorName={authorName} members={otherMembers} visibilityLabel={visibilityLabel} groups={groups}
               personName={personName} personColor={personColor} cardGradients={pal.cardGradients} readOnly={readOnly}
@@ -850,7 +848,7 @@ export default function ExtratoApp({ spacesApi }) {
           <div id="sec-other" data-nav="sec-other" style={{ scrollMarginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
             {groups.map(g => (
               <OtherExpensesSection key={g.id} group={g} isDefault={g.id === DEFAULT_GROUP}
-                expenses={otherExpenses.filter(e => groupOf(e, groupIds) === g.id)} people={people} filterPerson="all" selectedMonth={selectedMonth}
+                expenses={otherExpenses.filter(e => groupOf(e, groupIds) === g.id)} people={people} filterPerson={filterPerson} selectedMonth={selectedMonth}
                 cards={cards} groups={groups} onNewEntry={openEntryForm} onRemove={(e, scope) => removeEntry('otherExpenses', e, scope)} onUpdate={(e, patch, scope) => updateEntry('otherExpenses', e, patch, scope)} onTogglePaid={toggleOtherExpensePaid} purchaseInfo={purchaseInfo} authorName={authorName} members={otherMembers} visibilityLabel={visibilityLabel}
                 personName={personName} personColor={personColor} readOnly={readOnly}
                 onRename={name => renameGroup(g.id, name)} onRemoveGroup={() => removeGroup(g.id)}
