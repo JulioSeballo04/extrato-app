@@ -356,7 +356,7 @@ function InvoiceHint({ card, date }) {
 }
 
 // "Ordenar por: [Data] [Valor] [Parcelas recentes]"
-function SortPicker({ sort, onChange }) {
+export function SortPicker({ sort, onChange }) {
   return (
     <div role="group" aria-label="Ordenar lançamentos" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap', marginBottom: '0.35rem' }}>
       <span className="hint" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><ArrowDownUp size={12} aria-hidden="true" />Ordenar por</span>
@@ -368,13 +368,13 @@ function SortPicker({ sort, onChange }) {
 }
 
 const SORT_KEY = 'gestor-de-gastos:ordem:';
-function savedSort(scope, fallback) {
+export function savedSort(scope, fallback) {
   try {
     const v = localStorage.getItem(SORT_KEY + scope);
     return ENTRY_SORTS.some(o => o.key === v) ? v : fallback;
   } catch { return fallback; }
 }
-function rememberSort(scope, key) {
+export function rememberSort(scope, key) {
   try { localStorage.setItem(SORT_KEY + scope, key); } catch { /* ignora */ }
 }
 
