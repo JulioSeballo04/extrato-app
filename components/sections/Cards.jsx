@@ -1,11 +1,12 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Plus, Trash2, ChevronDown, ChevronUp, Check, HandCoins, Pencil } from 'lucide-react';
+import { Plus, Trash2, ChevronDown, ChevronUp, Check, HandCoins, Pencil, ListChecks } from 'lucide-react';
 import { Dot, StatusBadge, MoneyInput } from '../ui';
 import { EntryList } from './Entries';
+import InvoiceCheck from './InvoiceCheck';
 import { CARD_COLORS, cardColorKey } from '../../lib/theme';
-import { money, parseAmount, amountInput, monthLabel, matchesMonth, isRecurring, invoiceInfo, entriesNote, sumAmounts, isPayee, capitalize, cardLimitUsage, entryInInvoice, invoiceCloseDate, fmtDate, todayStr, byRecentPurchase } from '../../lib/ledger';
+import { money, parseAmount, amountInput, monthLabel, matchesMonth, isRecurring, invoiceInfo, entriesNote, sumAmounts, isPayee, capitalize, cardLimitUsage, entryInInvoice, invoiceCloseDate, fmtDate, todayStr, invoiceName, invoiceCycle } from '../../lib/ledger';
 
 export default function CardsSection({
   cards, people, cardTransactions, filterPerson, selectedMonth, expandedCard, setExpandedCard,
@@ -32,16 +33,17 @@ export default function CardsSection({
   const toggleCard = id => setExpandedCard(expandedCard === id ? null : id);
   const realCards = cards.filter(c => !isPayee(c));
   const payees = cards.filter(isPayee);
-  const payeeIds = new Set(payees.map(c => c.id));
   const openForm = which => {
     setFormOpen(which === 'card' ? !formOpen : false);
     setPayeeFormOpen(which === 'payee' ? !payeeFormOpen : false);
   };
 
-  // Quanto cada pessoa gastou em todos os cartões (sem as pessoas a pagar) no mês.
+  // Quanto cada pessoa gastou em todos os cartões (sem as pessoas a pagar) no
+  // mês: a fatura de cada cartão (respeita o dia de fechamento).
+  const realById = new Map(cards.filter(c => !isPayee(c)).map(c => [c.id, c]));
   const spentByPerson = people.map(p => ({
     person: p,
-    total: sumAmounts(cardTransactions.filter(t => t.personId === p.id && !payeeIds.has(t.cardId) && matchesMonth(t, selectedMonth))),
+    total: sumAmounts(cardTransactions.filter(t => t.personId === p.id && realById.has(t.cardId) && entryInInvoice(realById.get(t.cardId), t, selectedMonth))),
   }));
   const spentTotal = spentByPerson.reduce((s, x) => s + x.total, 0);
 
@@ -83,7 +85,7 @@ export default function CardsSection({
             Limite
             <MoneyInput value={limitValue} onChange={setLimitValue} />
           </label>
-          <label className="field" style={{ flex: '0 1 110px' }}>
+          <label className="field" style={{ flex: '0 1 110px' }} title="Dia em que a fatura fecha (o “melhor dia de compra” no app do banco). Compras desse dia em diante vão para a fatura seguinte.">
             Fecha dia
             <input placeholder="opcional" type="number" inputMode="numeric" min="1" max="31" value={closeDay} onChange={e => setCloseDay(e.target.value)} />
           </label>
@@ -120,7 +122,7 @@ export default function CardsSection({
             const expanded = expandedCard === c.id;
             return (
               <div key={c.id} className="credit-card" role="button" tabIndex={0} aria-expanded={expanded}
-                aria-label={`Cartão ${c.name}: fatura de ${monthLabel(selectedMonth)} ${money(used)}${c.limitValue > 0 ? `, limite disponível ${money(limit.available)} de ${money(c.limitValue)}` : ''}. ${expanded ? 'Fechar' : 'Ver'} lançamentos`}
+                aria-label={`Cartão ${c.name}: fatura de ${invoiceName(c, selectedMonth)} ${money(used)}${c.limitValue > 0 ? `, limite disponível ${money(limit.available)} de ${money(c.limitValue)}` : ''}. ${expanded ? 'Fechar' : 'Ver'} lançamentos`}
                 onClick={() => toggleCard(c.id)}
                 onKeyDown={e => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); toggleCard(c.id); } }}
                 style={{ background: `linear-gradient(135deg, ${ca}, ${cb})` }}>
@@ -137,7 +139,7 @@ export default function CardsSection({
                   <div>
                     <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.8)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>{c.name}</div>
                     <div className="mono" style={{ fontSize: '1rem', color: '#fff', fontWeight: 600 }}>{money(used)}</div>
-                    <div style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.75)' }}>fatura de {monthLabel(selectedMonth).split(' ')[0]}</div>
+                    <div style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.75)' }}>fatura de {invoiceName(c, selectedMonth)}</div>
                   </div>
                   {expanded ? <ChevronUp size={18} color="rgba(255,255,255,0.85)" /> : <ChevronDown size={18} color="rgba(255,255,255,0.85)" />}
                 </div>
@@ -319,8 +321,6 @@ function CardLedger({ card, cards, allTransactions, people, monthTransactions, f
 
   const transactions = monthTransactions.filter(t => filterPerson === 'all' || t.personId === filterPerson);
   const fixedTotal = sumAmounts(transactions.filter(isRecurring));
-  // Compras mais recentes primeiro (1/9 de agora antes de 2/3 do mês passado; fixos antigos no fim).
-  const sorted = [...transactions].sort(byRecentPurchase);
   const spentByPerson = people
     .map(p => ({ person: p, total: sumAmounts(monthTransactions.filter(t => t.personId === p.id)) }))
     .filter(x => x.total > 0);
@@ -328,10 +328,14 @@ function CardLedger({ card, cards, allTransactions, people, monthTransactions, f
   // Fatura com as compras deste mês (cartão: vence no mês seguinte; pessoa: no próprio mês).
   const invoiceTotal = sumAmounts(monthTransactions);
   const month = monthLabel(selectedMonth).split(' ')[0];
+  // Nome da fatura como no banco (mês do vencimento) e o período de compras dela.
+  const invoice = invoiceName(card, selectedMonth);
+  const cycle = invoiceCycle(card, selectedMonth);
   const limit = !payee && card.limitValue > 0 ? cardLimitUsage(card, allTransactions || []) : null;
   const closeDate = payee ? null : invoiceCloseDate(card, selectedMonth);
   const [editing, setEditing] = useState(false);
-  useEffect(() => { setEditing(false); }, [card.id]);
+  const [checking, setChecking] = useState(false);
+  useEffect(() => { setEditing(false); setChecking(false); }, [card.id]);
   const due = invoiceInfo(card, selectedMonth, invoiceTotal);
   const dueColor = due?.paid ? 'var(--success)' : due?.urgent ? 'var(--danger)' : 'var(--text-muted)';
 
@@ -364,7 +368,7 @@ function CardLedger({ card, cards, allTransactions, people, monthTransactions, f
         )}
         {due && (
           <span style={{ color: dueColor, fontWeight: 600 }}>
-            {payee ? capitalize(month) : `Fatura de ${month}`}: {due.paid ? (payee ? 'pago' : 'paga') : due.text.charAt(0).toLowerCase() + due.text.slice(1)}
+            {payee ? capitalize(month) : `Fatura de ${invoice}`}: {due.paid ? (payee ? 'pago' : 'paga') : due.text.charAt(0).toLowerCase() + due.text.slice(1)}
           </span>
         )}
         {!readOnly && invoiceTotal > 0 && (
@@ -378,6 +382,13 @@ function CardLedger({ card, cards, allTransactions, people, monthTransactions, f
           </button>
         )}
 
+        {invoiceTotal > 0 && (
+          <button className="ghost" onClick={() => setChecking(true)}
+            title="Checklist para conferir se cada lançamento está na fatura do banco">
+            <ListChecks size={14} />Conferir planilha
+          </button>
+        )}
+
         {spentByPerson.map(({ person, total }) => (
           <span key={person.id} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', color: 'var(--text-dim)' }}>
             <Dot color={personColor(person.id)} />
@@ -385,6 +396,19 @@ function CardLedger({ card, cards, allTransactions, people, monthTransactions, f
           </span>
         ))}
       </div>
+
+      {cycle && (
+        <p className="hint" style={{ margin: '-0.4rem 0 0.9rem' }}>
+          Fatura de {invoice}: compras de <span className="mono">{fmtDate(cycle.start)}</span> a <span className="mono">{fmtDate(cycle.end)}</span>
+          {' '}(gastos de {month}). Compras a partir de {fmtDate(closeDate)} já vão para a fatura seguinte.
+        </p>
+      )}
+      {!payee && !card.closeDay && (
+        <p className="hint" style={{ margin: '-0.4rem 0 0.9rem' }}>
+          Sem dia de fechamento, cada compra conta no mês da própria data. Informe o fechamento (o “melhor dia de compra”) em Editar cartão
+          para o app separar as faturas como o banco.
+        </p>
+      )}
 
       {editing && !readOnly && (
         <CardEditForm card={card} payee={payee} onCancel={() => setEditing(false)}
@@ -402,8 +426,14 @@ function CardLedger({ card, cards, allTransactions, people, monthTransactions, f
         <p className="muted" style={{ marginBottom: '0.75rem' }}>Cadastre uma pessoa acima para lançar gastos neste cartão.</p>
       )}
 
+      {checking && (
+        <InvoiceCheck card={card} items={monthTransactions} selectedMonth={selectedMonth}
+          title={payee ? `${card.name} · ${month}` : `${card.name} · fatura de ${invoice}`}
+          personName={personName} personColor={personColor} onClose={() => setChecking(false)} />
+      )}
+
       <EntryList
-        items={sorted} people={people} cards={cards} groups={groups} purchaseInfo={purchaseInfo} readOnly={readOnly}
+        items={transactions} sortScope="cartao" defaultSort="recent" people={people} cards={cards} groups={groups} purchaseInfo={purchaseInfo} readOnly={readOnly}
         // Parcela no cartão: marca se aquela parcela já foi quitada (não vence sozinha; quem vence é a fatura).
         // A parcela no cartão segue a fatura do mês: paga quando a fatura foi paga
         // (ou quando foi lançada como "já paga"). Pessoa a pagar: o "pago" é do mês.
@@ -455,7 +485,7 @@ function CardEditForm({ card, payee, onSave, onCancel }) {
           </label>
         )}
         {!payee && (
-          <label className="field">
+          <label className="field" title="Dia em que a fatura fecha (o “melhor dia de compra” no app do banco). Compras desse dia em diante vão para a fatura seguinte.">
             Fecha dia
             <input type="number" inputMode="numeric" min="1" max="31" placeholder="opcional" value={closeDay} onChange={e => { setCloseDay(e.target.value); setError(''); }} />
           </label>

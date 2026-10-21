@@ -1,9 +1,9 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Pencil, Trash2, Check, ChevronDown, EyeOff } from 'lucide-react';
+import { Pencil, Trash2, Check, ChevronDown, EyeOff, ArrowDownUp } from 'lucide-react';
 import { Dot, Tag, Sheet, MoneyInput } from '../ui';
-import { CATEGORIES, DEFAULT_CATEGORY, money, parseAmount, amountInput, fmtDate, isRecurring, defaultDateFor, dueDateIn, changeScopes, splitAmount, purchasePlan, PAYMENT_METHODS, methodLabel, parseTarget, outsideTarget, DEFAULT_GROUP } from '../../lib/ledger';
+import { CATEGORIES, DEFAULT_CATEGORY, money, parseAmount, amountInput, fmtDate, isRecurring, defaultDateFor, changeScopes, splitAmount, purchasePlan, PAYMENT_METHODS, methodLabel, parseTarget, outsideTarget, DEFAULT_GROUP, ENTRY_SORTS, sortEntries, shownDate, isPayee, invoiceKeyOf, invoiceDueDate, invoiceName, monthLabel } from '../../lib/ledger';
 
 export const OUTSIDE_CARD = 'outside';
 
@@ -151,6 +151,7 @@ export function EntryForm({ people, cards, selectedMonth, initialTarget, onSubmi
             </select>
           </label>
         </div>
+        <InvoiceHint card={outside ? null : cards.find(c => c.id === target)} date={date} />
 
         <button type="button" className="ghost" onClick={() => setShowMore(s => !s)} aria-expanded={showMore} style={{ alignSelf: 'flex-start' }}>
           <ChevronDown size={14} style={{ transform: showMore ? 'rotate(180deg)' : 'none' }} />
@@ -256,11 +257,20 @@ export function PersonChip({ person, pressed, onClick, color }) {
 // `status(item)` devolve o selo de pagamento (ou null) daquela linha.
 // Ao editar ou apagar uma parcela, parte de compra dividida ou fixo, pergunta
 // a quem a mudança vale (ver changeScopes) antes de aplicar.
-export function EntryList({ items, people, cards = [], groups = [], members = [], purchaseInfo, visibilityLabel, status, onUpdate, onRemove, personName, personColor, readOnly, emptyText, selectedMonth, authorName }) {
+// A ordem (data, valor ou parcelas recentes) é escolhida na própria lista e
+// lembrada neste aparelho, separada por `sortScope` (ex.: cartão, fora dele).
+export function EntryList({ items, people, cards = [], groups = [], members = [], purchaseInfo, visibilityLabel, status, onUpdate, onRemove, personName, personColor, readOnly, emptyText, selectedMonth, authorName, sortScope = 'lista', defaultSort = 'recent' }) {
   const [editingId, setEditingId] = useState(null);
   const [asking, setAsking] = useState(null); // { item, action: 'edit' | 'delete', patch? }
+  const [sort, setSort] = useState(() => savedSort(sortScope, defaultSort));
 
   if (items.length === 0) return <p className="muted">{emptyText}</p>;
+  const cardOf = id => (id ? cards.find(c => c.id === id) : null);
+  const sorted = sortEntries(items, sort, selectedMonth, cardOf);
+  function chooseSort(key) {
+    setSort(key);
+    rememberSort(sortScope, key);
+  }
 
   function remove(t) {
     const scopes = changeScopes(t, selectedMonth, 'delete');
@@ -284,7 +294,8 @@ export function EntryList({ items, people, cards = [], groups = [], members = []
 
   return (
     <div>
-      {items.map(t => (
+      {items.length > 1 && <SortPicker sort={sort} onChange={chooseSort} />}
+      {sorted.map(t => (
         editingId === t.id ? (
           <EditRow key={t.id} item={t} people={people} cards={cards} groups={groups} members={members} purchaseInfo={purchaseInfo} onSave={patch => save(t, patch)} onCancel={() => setEditingId(null)} />
         ) : (
@@ -295,7 +306,7 @@ export function EntryList({ items, people, cards = [], groups = [], members = []
             </div>
             <div className="row-line" style={{ gap: '0.4rem' }}>
               <span className="mono" style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-                {fmtDate(selectedMonth && isRecurring(t) ? dueDateIn(t, selectedMonth) : t.date)}
+                {fmtDate(shownDate(t, selectedMonth, cardOf(t.cardId)))}
               </span>
               <Dot color={personColor(t.personId)} />
               <span style={{ color: 'var(--text-dim)', fontSize: '0.8rem' }}>{personName(t.personId)}</span>
@@ -328,6 +339,43 @@ export function EntryList({ items, people, cards = [], groups = [], members = []
       ))}
     </div>
   );
+}
+
+// Em qual fatura a compra vai cair, para não haver surpresa com o fechamento
+// (ex.: comprar no "melhor dia" já joga a compra para a fatura seguinte).
+function InvoiceHint({ card, date }) {
+  if (!card || isPayee(card) || !date) return null;
+  const key = invoiceKeyOf(card, date);
+  const due = invoiceDueDate(card, key);
+  return (
+    <p className="hint" role="status" style={{ marginTop: '-0.4rem' }}>
+      Vai para a fatura de <strong>{invoiceName(card, key)}</strong>{due && <> (vence {fmtDate(due)})</>}, nos gastos de {monthLabel(key)}.
+      {!card.closeDay && ' Este cartão não tem dia de fechamento: vale o mês da data.'}
+    </p>
+  );
+}
+
+// "Ordenar por: [Data] [Valor] [Parcelas recentes]"
+function SortPicker({ sort, onChange }) {
+  return (
+    <div role="group" aria-label="Ordenar lançamentos" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap', marginBottom: '0.35rem' }}>
+      <span className="hint" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><ArrowDownUp size={12} aria-hidden="true" />Ordenar por</span>
+      {ENTRY_SORTS.map(o => (
+        <button key={o.key} type="button" className="chip" aria-pressed={sort === o.key} onClick={() => onChange(o.key)}>{o.label}</button>
+      ))}
+    </div>
+  );
+}
+
+const SORT_KEY = 'gestor-de-gastos:ordem:';
+function savedSort(scope, fallback) {
+  try {
+    const v = localStorage.getItem(SORT_KEY + scope);
+    return ENTRY_SORTS.some(o => o.key === v) ? v : fallback;
+  } catch { return fallback; }
+}
+function rememberSort(scope, key) {
+  try { localStorage.setItem(SORT_KEY + scope, key); } catch { /* ignora */ }
 }
 
 // "Apagar / Salvar alteração em: [Só esta parcela] [Esta e as próximas] [A compra inteira]"

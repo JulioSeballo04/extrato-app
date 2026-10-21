@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { money, monthLabel, matchesMonth, shiftMonth, sumAmounts, isPayee, PAYMENT_METHODS, capitalize } from '../../lib/ledger';
+import { money, monthLabel, matchesMonth, shiftMonth, sumAmounts, isPayee, PAYMENT_METHODS, capitalize, entryInMonth, cardFinder } from '../../lib/ledger';
 
 // Crédito x outras formas (Pix, débito, boleto…): compras do mês e dos últimos
 // 6 meses. Duas cores fixas (--chart-credit / --chart-other), validadas para
@@ -11,7 +11,9 @@ const OTHER = 'var(--chart-other)';
 
 function splitMonth(month, cards, cardTransactions, otherExpenses, inScope) {
   const payeeIds = new Set(cards.filter(isPayee).map(c => c.id));
-  const cardTx = cardTransactions.filter(t => matchesMonth(t, month) && inScope(t));
+  // No cartão, conta a fatura do mês (respeita o dia de fechamento).
+  const cardOf = cardFinder(cards);
+  const cardTx = cardTransactions.filter(t => entryInMonth(t, month, cardOf) && inScope(t));
   const credit = sumAmounts(cardTx.filter(t => !payeeIds.has(t.cardId)));
   const owed = sumAmounts(cardTx.filter(t => payeeIds.has(t.cardId)));
   const others = otherExpenses.filter(e => matchesMonth(e, month) && inScope(e));

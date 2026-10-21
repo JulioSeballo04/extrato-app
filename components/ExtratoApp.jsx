@@ -8,8 +8,8 @@ import { readPendingInvite, clearPendingInvite } from '../lib/invite';
 import { BRAND } from '../lib/brand';
 import { PALETTES, AUTO_PALETTE, DEFAULT_PALETTE, resolvePaletteKey, paletteVars, writeCachedPalette, systemPrefersDark } from '../lib/theme';
 import {
-  DEFAULT_CATEGORY, money, monthLabel, capitalize, currentMonth, shiftMonth, monthsLaterDate, matchesMonth, isRecurring, isPaidIn,
-  isInvoicePaid, parseDueDay, sumAmounts, buildMonthBills, isPayee, DEFAULT_GROUP, groupOf, parseTarget, methodLabel, splitAmount, splitByWeights, purchasePlan, entriesInScope, dueDateIn,
+  DEFAULT_CATEGORY, money, monthLabel, capitalize, currentMonth, shiftMonth, monthsLaterDate, isRecurring, isPaidIn,
+  isInvoicePaid, parseDueDay, sumAmounts, buildMonthBills, isPayee, DEFAULT_GROUP, groupOf, parseTarget, methodLabel, splitAmount, splitByWeights, purchasePlan, entriesInScope, dueDateIn, entryInMonth, cardFinder, entryMonthOf, invoiceName,
 } from '../lib/ledger';
 import { APP_CSS } from './appStyles';
 import { Toast } from './ui';
@@ -184,8 +184,10 @@ export default function ExtratoApp({ spacesApi }) {
 
   // "No cartão" conta só cartões; o que se deve a pessoas entra em "outros".
   const payeeIds = new Set(cards.filter(isPayee).map(c => c.id));
+  // No cartão, o gasto do mês é a fatura (respeita o dia de fechamento).
+  const cardOf = cardFinder(cards);
   function personTotal(personId, month) {
-    const mine = t => t.personId === personId && (!month || matchesMonth(t, month));
+    const mine = t => t.personId === personId && (!month || entryInMonth(t, month, cardOf));
     const cardSum = sumAmounts(cardTransactions.filter(t => mine(t) && !payeeIds.has(t.cardId)));
     const otherSum = sumAmounts(otherExpenses.filter(mine)) + sumAmounts(cardTransactions.filter(t => mine(t) && payeeIds.has(t.cardId)));
     return { cardSum, otherSum, total: cardSum + otherSum };
@@ -193,7 +195,7 @@ export default function ExtratoApp({ spacesApi }) {
   const availableMonths = Array.from(new Set([
     selectedMonth,
     currentMonth(),
-    ...cardTransactions.map(t => t.date && t.date.slice(0, 7)),
+    ...cardTransactions.map(t => t.date && entryMonthOf(cardOf(t.cardId), t.date)),
     ...otherExpenses.map(t => t.date && t.date.slice(0, 7)),
   ].filter(Boolean))).sort();
 
@@ -372,11 +374,14 @@ export default function ExtratoApp({ spacesApi }) {
       }, { ...extra, groupId: DEFAULT_GROUP, ...(entry.downMethod ? { method: entry.downMethod } : {}) }).map(x => ({ ...x, paid: true }))));
     }
     setEntryForm(null);
-    const entryMonth = entry.date.slice(0, 7);
+    // No cartão, o mês segue a fatura (ex.: compra depois do fechamento vai para a seguinte).
+    const card = cardId ? cardOf(cardId) : null;
+    const entryMonth = entryMonthOf(card, entry.date);
     const what = down ? `Gasto lançado, com entrada de ${money(down)}` : 'Gasto lançado';
+    const where = card && !isPayee(card) ? ` na fatura de ${invoiceName(card, entryMonth)} do ${card.name}` : '';
     setToast(entryMonth === selectedMonth
-      ? { text: `${what}.` }
-      : { text: `${what} em ${monthLabel(entryMonth)}.`, action: { label: 'Ir para o mês', run: () => setSelectedMonth(entryMonth) } });
+      ? { text: `${what}${where}.` }
+      : { text: `${what}${where}, nos gastos de ${monthLabel(entryMonth)}.`, action: { label: 'Ir para o mês', run: () => setSelectedMonth(entryMonth) } });
   }
   const entriesOf = coll => (coll === 'cardTransactions' ? cardTransactions : otherExpenses);
 
@@ -873,7 +878,7 @@ export default function ExtratoApp({ spacesApi }) {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(340px, 100%), 1fr))', gap: '2rem', alignItems: 'start' }}>
             {show('categories') && (
               <CategorySummarySection
-                cardTransactions={cardTransactions} otherExpenses={otherExpenses}
+                cards={cards} cardTransactions={cardTransactions} otherExpenses={otherExpenses}
                 filterPerson={filterPerson} selectedMonth={selectedMonth} categoryColors={pal.people}
               />
             )}
