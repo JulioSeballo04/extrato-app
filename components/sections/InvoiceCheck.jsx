@@ -34,6 +34,17 @@ export default function InvoiceCheck({ card, items, selectedMonth, title, person
   const missing = list.length - checked.size;
   const bank = saved.bank ? parseAmount(saved.bank) : null;
   const diff = bank === null ? 0 : Math.round((bank - total) * 100) / 100;
+  // Pistas para achar a diferença: lançamentos que parecem repetidos (mesma
+  // descrição, valor, data e pessoa; as partes de uma compra dividida têm
+  // pessoas diferentes, então não contam) e os que valem exatamente a diferença.
+  const cents = v => Math.round(Number(v || 0) * 100);
+  const byKey = new Map();
+  for (const t of list) {
+    const k = [String(t.description).trim().toLowerCase(), cents(t.amount), shownDate(t, selectedMonth, card), t.personId].join('|');
+    byKey.set(k, [...(byKey.get(k) || []), t.id]);
+  }
+  const repeated = new Set([...byKey.values()].filter(ids => ids.length > 1).flat());
+  const sameAsDiff = diff ? list.filter(t => cents(t.amount) === cents(Math.abs(diff))) : [];
 
   function toggle(id) {
     const ids = checked.has(id) ? [...checked].filter(x => x !== id) : [...checked, id];
@@ -80,6 +91,9 @@ export default function InvoiceCheck({ card, items, selectedMonth, title, person
                     {t.description}
                     {t.installmentTotal > 1 && <span className="mono hint"> {t.installmentNumber}/{t.installmentTotal}</span>}
                     {isRecurring(t) && <span className="hint"> · fixo</span>}
+                    {repeated.has(t.id) && (
+                      <span title="Mesma descrição, valor, data e pessoa de outro lançamento" style={{ marginLeft: 6, fontSize: '0.72rem', fontWeight: 600, color: 'var(--danger)', textDecoration: 'none', display: 'inline-block' }}>repetido?</span>
+                    )}
                   </span>
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
                     <span className="mono">{fmtDate(shownDate(t, selectedMonth, card))}</span>
@@ -105,9 +119,34 @@ export default function InvoiceCheck({ card, items, selectedMonth, title, person
                 ? 'Bate com o app.'
                 : diff > 0
                   ? `A fatura tem ${money(diff)} a mais: falta lançar algo aqui.`
-                  : `O app tem ${money(-diff)} a mais que a fatura: confira o que ficou sem marcar.`}
+                  : `O app tem ${money(-diff)} a mais que a fatura: ${missing > 0 ? 'confira o que ficou sem marcar.' : 'veja as pistas abaixo.'}`}
             </p>
           )}
+        </div>
+      )}
+      {diff !== 0 && (
+        <div style={{ marginTop: '0.75rem', padding: '0.7rem 0.8rem', borderRadius: 10, background: 'var(--panel-alt)', fontSize: '0.82rem' }}>
+          <strong>Onde pode estar a diferença</strong>
+          <ul style={{ margin: '0.4rem 0 0', paddingLeft: '1.1rem', display: 'flex', flexDirection: 'column', gap: '0.3rem', color: 'var(--text-dim)' }}>
+            {sameAsDiff.length > 0 && (
+              <li>
+                {sameAsDiff.length === 1 ? 'Um lançamento vale' : `${sameAsDiff.length} lançamentos valem`} exatamente {money(Math.abs(diff))}:{' '}
+                {sameAsDiff.map(t => `${t.description} (${fmtDate(shownDate(t, selectedMonth, card))})`).join(', ')}.
+              </li>
+            )}
+            {repeated.size > 0 && <li>Há lançamentos marcados como <strong style={{ color: 'var(--danger)' }}>repetido?</strong> na lista: veja se a compra não foi lançada duas vezes.</li>}
+            {diff < 0 ? (
+              <>
+                <li>Estorno ou crédito na fatura do banco diminui o total dela: desconte o valor da compra aqui.</li>
+                <li>Confira também o valor de cada item, não só se ele aparece, e se algum fixo (assinatura) já foi cancelado.</li>
+              </>
+            ) : (
+              <>
+                <li>IOF, anuidade, juros ou tarifas aparecem só na fatura do banco.</li>
+                <li>Confira se alguma compra ficou sem lançar ou com valor menor aqui.</li>
+              </>
+            )}
+          </ul>
         </div>
       )}
     </Sheet>
