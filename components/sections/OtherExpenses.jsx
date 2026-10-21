@@ -18,7 +18,7 @@ export default function OtherExpensesSection({
 
   const inMonth = expenses.filter(e => matchesMonth(e, selectedMonth) && (filterPerson === 'all' || e.personId === filterPerson));
   const fixedTotal = sumAmounts(inMonth.filter(isRecurring));
-  const filtered = inMonth.filter(e => !onlyFixed || isRecurring(e)).sort((a, b) => (a.date < b.date ? 1 : -1));
+  const filtered = inMonth.filter(e => !onlyFixed || isRecurring(e));
   const monthTotal = sumAmounts(inMonth);
 
   return (
@@ -78,7 +78,7 @@ export default function OtherExpensesSection({
       )}
 
       <EntryList
-        items={filtered} people={people} cards={cards} groups={groups} purchaseInfo={purchaseInfo} readOnly={readOnly}
+        items={filtered} sortScope="fora" defaultSort="date" people={people} cards={cards} groups={groups} purchaseInfo={purchaseInfo} readOnly={readOnly}
         status={e => (
           <StatusBadge status={entryStatus(isPaidIn(e, selectedMonth), dueDateIn(e, selectedMonth))} readOnly={readOnly}
             onToggle={() => onTogglePaid(e.id, selectedMonth)} />

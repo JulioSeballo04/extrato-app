@@ -1,11 +1,12 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Plus, Trash2, ChevronDown, ChevronUp, Check, HandCoins, Pencil } from 'lucide-react';
+import { Plus, Trash2, ChevronDown, ChevronUp, Check, HandCoins, Pencil, ListChecks } from 'lucide-react';
 import { Dot, StatusBadge, MoneyInput } from '../ui';
 import { EntryList } from './Entries';
+import InvoiceCheck from './InvoiceCheck';
 import { CARD_COLORS, cardColorKey } from '../../lib/theme';
-import { money, parseAmount, amountInput, monthLabel, matchesMonth, isRecurring, invoiceInfo, entriesNote, sumAmounts, isPayee, capitalize, cardLimitUsage, entryInInvoice, invoiceCloseDate, fmtDate, todayStr, byRecentPurchase } from '../../lib/ledger';
+import { money, parseAmount, amountInput, monthLabel, matchesMonth, isRecurring, invoiceInfo, entriesNote, sumAmounts, isPayee, capitalize, cardLimitUsage, entryInInvoice, invoiceCloseDate, fmtDate, todayStr } from '../../lib/ledger';
 
 export default function CardsSection({
   cards, people, cardTransactions, filterPerson, selectedMonth, expandedCard, setExpandedCard,
@@ -319,8 +320,6 @@ function CardLedger({ card, cards, allTransactions, people, monthTransactions, f
 
   const transactions = monthTransactions.filter(t => filterPerson === 'all' || t.personId === filterPerson);
   const fixedTotal = sumAmounts(transactions.filter(isRecurring));
-  // Compras mais recentes primeiro (1/9 de agora antes de 2/3 do mês passado; fixos antigos no fim).
-  const sorted = [...transactions].sort(byRecentPurchase);
   const spentByPerson = people
     .map(p => ({ person: p, total: sumAmounts(monthTransactions.filter(t => t.personId === p.id)) }))
     .filter(x => x.total > 0);
@@ -331,7 +330,8 @@ function CardLedger({ card, cards, allTransactions, people, monthTransactions, f
   const limit = !payee && card.limitValue > 0 ? cardLimitUsage(card, allTransactions || []) : null;
   const closeDate = payee ? null : invoiceCloseDate(card, selectedMonth);
   const [editing, setEditing] = useState(false);
-  useEffect(() => { setEditing(false); }, [card.id]);
+  const [checking, setChecking] = useState(false);
+  useEffect(() => { setEditing(false); setChecking(false); }, [card.id]);
   const due = invoiceInfo(card, selectedMonth, invoiceTotal);
   const dueColor = due?.paid ? 'var(--success)' : due?.urgent ? 'var(--danger)' : 'var(--text-muted)';
 
@@ -378,6 +378,13 @@ function CardLedger({ card, cards, allTransactions, people, monthTransactions, f
           </button>
         )}
 
+        {invoiceTotal > 0 && (
+          <button className="ghost" onClick={() => setChecking(true)}
+            title="Checklist para conferir se cada lançamento está na fatura do banco">
+            <ListChecks size={14} />Conferir planilha
+          </button>
+        )}
+
         {spentByPerson.map(({ person, total }) => (
           <span key={person.id} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', color: 'var(--text-dim)' }}>
             <Dot color={personColor(person.id)} />
@@ -402,8 +409,14 @@ function CardLedger({ card, cards, allTransactions, people, monthTransactions, f
         <p className="muted" style={{ marginBottom: '0.75rem' }}>Cadastre uma pessoa acima para lançar gastos neste cartão.</p>
       )}
 
+      {checking && (
+        <InvoiceCheck card={card} items={monthTransactions} selectedMonth={selectedMonth}
+          title={payee ? `${card.name} · ${month}` : `${card.name} · fatura de ${month}`}
+          personName={personName} personColor={personColor} onClose={() => setChecking(false)} />
+      )}
+
       <EntryList
-        items={sorted} people={people} cards={cards} groups={groups} purchaseInfo={purchaseInfo} readOnly={readOnly}
+        items={transactions} sortScope="cartao" defaultSort="recent" people={people} cards={cards} groups={groups} purchaseInfo={purchaseInfo} readOnly={readOnly}
         // Parcela no cartão: marca se aquela parcela já foi quitada (não vence sozinha; quem vence é a fatura).
         // A parcela no cartão segue a fatura do mês: paga quando a fatura foi paga
         // (ou quando foi lançada como "já paga"). Pessoa a pagar: o "pago" é do mês.
