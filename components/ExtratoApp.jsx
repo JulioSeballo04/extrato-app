@@ -24,7 +24,7 @@ import { PaymentsSection } from './sections/Payments';
 import { EntryForm, PersonChip } from './sections/Entries';
 import { CalendarSection, BillsPanel } from './sections/Calendar';
 import { CategorySummarySection, SummarySection, ReportSection } from './sections/Reports';
-import { MonthOverview, Onboarding, WhoAreYou } from './sections/Overview';
+import { Onboarding, WhoAreYou } from './sections/Overview';
 
 const VISIBLE_SECTIONS_KEY = 'gestor-de-gastos:secoes-visiveis';
 const EMPTY_DATA = { people: [], cards: [], cardTransactions: [], otherExpenses: [], expenseGroups: [] };
@@ -222,14 +222,6 @@ export default function ExtratoApp({ spacesApi }) {
   const billsOverdue = monthBills.filter(b => b.status === 'overdue').length;
 
   const scopePeople = topIds.size === 0 ? people : people.filter(p => topIds.has(p.id));
-  const overview = scopePeople.reduce((acc, p) => {
-    const t = personTotal(p.id, selectedMonth);
-    acc.cardSum += t.cardSum; acc.otherSum += t.otherSum;
-    acc.salary += Number(p.salary) || 0;
-    return acc;
-  }, { cardSum: 0, otherSum: 0, salary: 0 });
-  const billsPaid = sumAmounts(monthBills.filter(b => b.paid));
-  const billsTotal = sumAmounts(monthBills);
 
   function personName(id) {
     const p = people.find(p => p.id === id);
@@ -810,14 +802,6 @@ export default function ExtratoApp({ spacesApi }) {
         )}
 
         {people.length === 0 && peopleSection}
-
-        {hasEntries && (
-          <MonthOverview
-            spent={overview.cardSum + overview.otherSum} cardSum={overview.cardSum} otherSum={overview.otherSum}
-            paid={billsPaid} toPay={billsTotal - billsPaid} billsTotal={billsTotal} overdueCount={billsOverdue} pendingCount={monthBills.length - billsPaidCount}
-            salary={overview.salary} monthName={monthLabel(selectedMonth).split(' ')[0]} onOpenBills={() => { setOpenPanel('bills'); scrollToSection('top'); }}
-          />
-        )}
 
         {/* "Ver gastos de": filtra os cartões, as pessoas a pagar e os outros gastos abaixo. */}
         {people.length > 1 && hasEntries && (

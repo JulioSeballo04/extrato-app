@@ -2,62 +2,6 @@
 
 import React from 'react';
 import { Check } from 'lucide-react';
-import { money } from '../../lib/ledger';
-
-// Os números do mês, logo no topo. São duas bases diferentes, e os rótulos
-// dizem isso: "Gastos" = o que foi comprado no mês; "A pagar"/"Já pago" = as
-// contas que VENCEM no mês (a fatura do cartão vence no mês seguinte à compra).
-// Respeita o filtro de pessoa.
-export function MonthOverview({ spent, cardSum, otherSum, paid, toPay, billsTotal, overdueCount, pendingCount, salary, onOpenBills, monthName }) {
-  // Sobra/Falta: o salário menos os gastos do mês (cartões + outros gastos),
-  // o mesmo valor do primeiro quadro.
-  const balance = salary - spent;
-  return (
-    <section aria-label="Resumo do mês">
-    <div className="overview">
-      <div className="tile">
-        <div className="tile-label">Gastos de {monthName}</div>
-        <div className="tile-value">{money(spent)}</div>
-        <div className="tile-sub">cartão {money(cardSum)} · outros {money(otherSum)}</div>
-      </div>
-      <button className="tile" onClick={onOpenBills} aria-label={`A pagar: ${money(toPay)}. Abrir contas do mês`}>
-        <div className="tile-label">A pagar · vence em {monthName}</div>
-        <div className="tile-value" style={{ color: overdueCount > 0 ? 'var(--danger)' : undefined }}>{money(toPay)}</div>
-        <div className="tile-sub" style={{ color: overdueCount > 0 ? 'var(--danger)' : undefined }}>
-          {overdueCount > 0
-            ? `${overdueCount} vencida${overdueCount > 1 ? 's' : ''} · ver contas`
-            : pendingCount > 0 ? `${pendingCount} conta${pendingCount > 1 ? 's' : ''} · ver contas` : 'tudo em dia'}
-        </div>
-      </button>
-      <div className="tile">
-        <div className="tile-label">Já pago · vence em {monthName}</div>
-        <div className="tile-value" style={{ color: 'var(--success)' }}>{money(paid)}</div>
-        <div className="tile-sub">{billsTotal > 0 ? `de ${money(billsTotal)} em contas` : 'nenhuma conta vence no mês'}</div>
-      </div>
-      <div className="tile">
-        <div className="tile-label">{salary > 0 ? (balance >= 0 ? 'Sobra' : 'Falta') : 'Sobra'}</div>
-        {salary > 0 ? (
-          <>
-            <div className="tile-value" style={{ color: balance >= 0 ? 'var(--success)' : 'var(--danger)' }}>{money(Math.abs(balance))}</div>
-            <div className="tile-sub">
-              salário {money(salary)} − gastos {money(spent)}
-            </div>
-          </>
-        ) : (
-          <>
-            <div className="tile-value" style={{ color: 'var(--text-muted)' }}>—</div>
-            <div className="tile-sub">informe os salários para ver</div>
-          </>
-        )}
-      </div>
-    </div>
-    <p className="hint" style={{ marginTop: '0.5rem' }}>
-      “Gastos” são as compras feitas no mês. “A pagar” e “Já pago” são as contas que vencem no mês: a fatura do cartão
-      vence no mês seguinte ao da compra.
-    </p>
-    </section>
-  );
-}
 
 // Primeiro acesso: três passos para o app começar a fazer sentido.
 export function Onboarding({ hasPeople, hasCards, hasEntries, onAddPerson, onAddCard, onAddEntry }) {
