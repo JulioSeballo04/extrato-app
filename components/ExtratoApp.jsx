@@ -197,7 +197,18 @@ export default function ExtratoApp({ spacesApi }) {
     ...otherExpenses.map(t => t.date && t.date.slice(0, 7)),
   ].filter(Boolean))).sort();
 
-  const inScope = t => filterPerson === 'all' || t.personId === filterPerson;
+  // Conta ↔ pessoa: qual pessoa da lista é quem está usando o app.
+  const myPerson = people.find(p => p.uid === user?.uid) || null;
+  // Espaço só seu: o topo (resumo e contas) mostra só os seus gastos e não há
+  // "Ver gastos de". Compartilhado: aparecem todos, com o seletor.
+  // Sem pessoa ligada à conta, vale a criada junto com a conta ou a que tem o
+  // primeiro nome da conta.
+  const isShared = (space?.members?.length || 0) > 1;
+  const firstName = (user?.displayName || '').trim().split(/\s+/)[0].toLowerCase();
+  const me = myPerson || people.find(p => p.id === `p_${user?.uid}`)
+    || (firstName ? people.find(p => p.name.trim().toLowerCase() === firstName) : null);
+  const topPerson = !isShared && me ? me.id : filterPerson;
+  const inScope = t => topPerson === 'all' || t.personId === topPerson;
   const monthBills = buildMonthBills(data, selectedMonth, inScope);
   const calendarBills = monthBills; // só contas com valor (sem faturas de R$ 0,00)
   function toggleBill(bill) {
@@ -208,7 +219,7 @@ export default function ExtratoApp({ spacesApi }) {
   const billsOverdue = monthBills.filter(b => b.status === 'overdue').length;
 
   // Números do topo (respeitam o filtro de pessoa).
-  const scopePeople = filterPerson === 'all' ? people : people.filter(p => p.id === filterPerson);
+  const scopePeople = topPerson === 'all' ? people : people.filter(p => p.id === topPerson);
   // Sobra/Falta compara só quem tem salário: os gastos dessas pessoas com o salário delas.
   const overview = scopePeople.reduce((acc, p) => {
     const t = personTotal(p.id, selectedMonth);
@@ -250,8 +261,6 @@ export default function ExtratoApp({ spacesApi }) {
   }
   const visibleToFor = hideFrom => (hideFrom?.length ? (space?.members || []).filter(u => !hideFrom.includes(u)) : null);
 
-  // Conta ↔ pessoa: qual pessoa da lista é quem está usando o app.
-  const myPerson = people.find(p => p.uid === user?.uid) || null;
   const memberLabel = uid => (uid === user?.uid ? 'você' : (space?.labels?.[uid] || '').split('@')[0] || 'outro membro');
   function linkMeToPerson(personId) {
     const p = people.find(x => x.id === personId);
@@ -755,7 +764,7 @@ export default function ExtratoApp({ spacesApi }) {
           )}
         </div>
 
-        {people.length > 1 && salariedPeople.length > 0 && (
+        {(isShared || !me) && people.length > 1 && salariedPeople.length > 0 && (
           <div className="no-print" role="group" aria-label="Ver gastos de" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
             <span className="hint" style={{ marginRight: '0.2rem' }}>Ver gastos de</span>
             <button className="chip" aria-pressed={filterPerson === 'all'} onClick={() => setFilterPerson('all')}>Todos</button>
@@ -770,7 +779,7 @@ export default function ExtratoApp({ spacesApi }) {
           <BillsPanel
             bills={monthBills} selectedMonth={selectedMonth} onToggle={toggleBill} onClose={() => setOpenPanel(null)}
             personName={personName} personColor={personColor} readOnly={readOnly}
-            filterLabel={filterPerson === 'all' ? null : personName(filterPerson)}
+            filterLabel={topPerson === 'all' ? null : personName(topPerson)}
           />
         )}
         {openPanel === 'space' && (
@@ -830,7 +839,7 @@ export default function ExtratoApp({ spacesApi }) {
           <div id="sec-cards" data-nav="sec-cards" style={{ scrollMarginTop: '1rem' }}>
             <CardsSection
               cards={cards} people={people} cardTransactions={cardTransactions}
-              filterPerson={filterPerson} selectedMonth={selectedMonth} expandedCard={expandedCard} setExpandedCard={setExpandedCard}
+              filterPerson="all" selectedMonth={selectedMonth} expandedCard={expandedCard} setExpandedCard={setExpandedCard}
               onAddCard={addCard} onRemoveCard={removeCard} onUpdateCard={updateCard} onToggleInvoice={toggleInvoicePaid}
               onNewEntry={openEntryForm} onRemoveTx={(t, scope) => removeEntry('cardTransactions', t, scope)} onUpdateTx={(t, patch, scope) => updateEntry('cardTransactions', t, patch, scope)} purchaseInfo={purchaseInfo} authorName={authorName} members={otherMembers} visibilityLabel={visibilityLabel} groups={groups}
               personName={personName} personColor={personColor} cardGradients={pal.cardGradients} readOnly={readOnly}
@@ -843,7 +852,7 @@ export default function ExtratoApp({ spacesApi }) {
           <div id="sec-other" data-nav="sec-other" style={{ scrollMarginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
             {groups.map(g => (
               <OtherExpensesSection key={g.id} group={g} isDefault={g.id === DEFAULT_GROUP}
-                expenses={otherExpenses.filter(e => groupOf(e, groupIds) === g.id)} people={people} filterPerson={filterPerson} selectedMonth={selectedMonth}
+                expenses={otherExpenses.filter(e => groupOf(e, groupIds) === g.id)} people={people} filterPerson="all" selectedMonth={selectedMonth}
                 cards={cards} groups={groups} onNewEntry={openEntryForm} onRemove={(e, scope) => removeEntry('otherExpenses', e, scope)} onUpdate={(e, patch, scope) => updateEntry('otherExpenses', e, patch, scope)} onTogglePaid={toggleOtherExpensePaid} purchaseInfo={purchaseInfo} authorName={authorName} members={otherMembers} visibilityLabel={visibilityLabel}
                 personName={personName} personColor={personColor} readOnly={readOnly}
                 onRename={name => renameGroup(g.id, name)} onRemoveGroup={() => removeGroup(g.id)}
