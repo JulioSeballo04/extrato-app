@@ -5,7 +5,7 @@ import { Plus, Trash2, ChevronDown, ChevronUp, Check, HandCoins, Pencil } from '
 import { Dot, StatusBadge, MoneyInput } from '../ui';
 import { EntryList } from './Entries';
 import { CARD_COLORS, cardColorKey } from '../../lib/theme';
-import { money, parseAmount, amountInput, monthLabel, matchesMonth, isRecurring, invoiceInfo, entriesNote, sumAmounts, isPayee, capitalize, cardLimitUsage, entryInInvoice, invoiceCloseDate, fmtDate } from '../../lib/ledger';
+import { money, parseAmount, amountInput, monthLabel, matchesMonth, isRecurring, invoiceInfo, entriesNote, sumAmounts, isPayee, capitalize, cardLimitUsage, entryInInvoice, invoiceCloseDate, fmtDate, todayStr } from '../../lib/ledger';
 
 export default function CardsSection({
   cards, people, cardTransactions, filterPerson, selectedMonth, expandedCard, setExpandedCard,
@@ -114,6 +114,9 @@ export default function CardsSection({
             // Limite como no banco: parcelas futuras ocupam, fatura paga libera (sempre "hoje").
             const limit = cardLimitUsage(c, cardTransactions);
             const due = invoiceInfo(c, selectedMonth, used);
+            // Fechamento da fatura do mês (se o cartão tem dia de fechamento).
+            const closeDate = invoiceCloseDate(c, selectedMonth);
+            const closed = closeDate && closeDate <= todayStr();
             const expanded = expandedCard === c.id;
             return (
               <div key={c.id} className="credit-card" role="button" tabIndex={0} aria-expanded={expanded}
@@ -150,8 +153,13 @@ export default function CardsSection({
                     </div>
                   </>
                 )}
+                {closeDate && !due?.paid && (
+                  <div style={{ fontSize: '0.72rem', marginTop: '0.5rem', color: 'rgba(255,255,255,0.8)' }}>
+                    {closed ? `Fechou em ${fmtDate(closeDate)}` : `Fecha em ${fmtDate(closeDate)}`}
+                  </div>
+                )}
                 {due && (
-                  <div style={{ fontSize: '0.75rem', fontWeight: 600, marginTop: '0.55rem', color: due.urgent ? '#FFD2C7' : 'rgba(255,255,255,0.85)' }}>
+                  <div style={{ fontSize: '0.75rem', fontWeight: 600, marginTop: closeDate && !due.paid ? '0.15rem' : '0.55rem', color: due.urgent ? '#FFD2C7' : 'rgba(255,255,255,0.85)' }}>
                     {due.text}
                   </div>
                 )}

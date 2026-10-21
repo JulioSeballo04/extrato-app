@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef } from 'react';
 import { X } from 'lucide-react';
-import { amountInput, parseAmount, nextMoneyText } from '../lib/ledger';
+import { amountInput, parseAmount, moneyTyping, moneyOnBlur } from '../lib/ledger';
 
 // Peças visuais pequenas, usadas em todas as seções.
 
@@ -99,13 +99,10 @@ export function Toast({ toast, onClose }) {
   );
 }
 
-// Campo de dinheiro: já mostra "R$ 0,00". Só dígitos entram pelos centavos,
-// como nos apps de banco; digitando a vírgula, o que veio antes vira reais
-// (ver nextMoneyText). `value` é o texto formatado ("1.234,50"); quem usa
-// converte com parseAmount. Colar "12,5" ou "1.234" também funciona.
-export function MoneyInput({ value, onChange, style, className = '', ...rest }) {
-  const decimals = useRef(null);
-  if (!value) decimals.current = null; // campo limpo (ex.: depois de lançar)
+// Campo de dinheiro, como calculadora: digitar 5000 dá "5.000"; a vírgula começa
+// os centavos (12,5). Ao sair do campo vira "5.000,00" (ver moneyTyping /
+// moneyOnBlur). `value` é o texto; quem usa converte com parseAmount.
+export function MoneyInput({ value, onChange, onBlur, style, className = '', ...rest }) {
   return (
     <span className="money-input" style={style}>
       <span className="money-prefix" aria-hidden="true">R$</span>
@@ -116,14 +113,14 @@ export function MoneyInput({ value, onChange, style, className = '', ...rest }) 
         autoComplete="off"
         placeholder="0,00"
         value={value}
-        onChange={e => {
-          const next = nextMoneyText(value, e.target.value, decimals.current);
-          decimals.current = next.decimals;
-          onChange(next.text);
+        onChange={e => onChange(moneyTyping(value, e.target.value))}
+        onBlur={e => {
+          const done = moneyOnBlur(value);
+          if (done !== value) onChange(done);
+          onBlur?.(e, done);
         }}
         onPaste={e => {
           e.preventDefault();
-          decimals.current = null;
           onChange(amountInput(Math.abs(parseAmount(e.clipboardData.getData('text')))));
         }}
       />
