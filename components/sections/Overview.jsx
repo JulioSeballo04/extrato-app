@@ -8,8 +8,9 @@ import { money } from '../../lib/ledger';
 // dizem isso: "Gastos" = o que foi comprado no mês; "A pagar"/"Já pago" = as
 // contas que VENCEM no mês (a fatura do cartão vence no mês seguinte à compra).
 // Respeita o filtro de pessoa.
-export function MonthOverview({ spent, cardSum, otherSum, paid, toPay, billsTotal, overdueCount, pendingCount, salary, onOpenBills, monthName }) {
-  const balance = salary - spent;
+export function MonthOverview({ spent, cardSum, otherSum, paid, toPay, billsTotal, overdueCount, pendingCount, salary, salariedSpent = spent, onOpenBills, monthName }) {
+  // Sobra/Falta: só os gastos de quem tem salário contra o salário dessas pessoas.
+  const balance = salary - salariedSpent;
   return (
     <section aria-label="Resumo do mês">
     <div className="overview">
@@ -37,7 +38,9 @@ export function MonthOverview({ spent, cardSum, otherSum, paid, toPay, billsTota
         {salary > 0 ? (
           <>
             <div className="tile-value" style={{ color: balance >= 0 ? 'var(--success)' : 'var(--danger)' }}>{money(Math.abs(balance))}</div>
-            <div className="tile-sub">salários {money(salary)}</div>
+            <div className="tile-sub">
+              {salariedSpent !== spent ? `gastos ${money(salariedSpent)} de quem tem salário · salários ${money(salary)}` : `salários ${money(salary)}`}
+            </div>
           </>
         ) : (
           <>

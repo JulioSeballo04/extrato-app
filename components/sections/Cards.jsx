@@ -5,7 +5,7 @@ import { Plus, Trash2, ChevronDown, ChevronUp, Check, HandCoins, Pencil } from '
 import { Dot, StatusBadge, MoneyInput } from '../ui';
 import { EntryList } from './Entries';
 import { CARD_COLORS, cardColorKey } from '../../lib/theme';
-import { money, parseAmount, amountInput, monthLabel, matchesMonth, isRecurring, invoiceInfo, entriesNote, sumAmounts, isPayee, capitalize, cardLimitUsage, entryInInvoice, invoiceCloseDate, fmtDate, todayStr } from '../../lib/ledger';
+import { money, parseAmount, amountInput, monthLabel, matchesMonth, isRecurring, invoiceInfo, entriesNote, sumAmounts, isPayee, capitalize, cardLimitUsage, entryInInvoice, invoiceCloseDate, fmtDate, todayStr, byRecentPurchase } from '../../lib/ledger';
 
 export default function CardsSection({
   cards, people, cardTransactions, filterPerson, selectedMonth, expandedCard, setExpandedCard,
@@ -319,7 +319,8 @@ function CardLedger({ card, cards, allTransactions, people, monthTransactions, f
 
   const transactions = monthTransactions.filter(t => filterPerson === 'all' || t.personId === filterPerson);
   const fixedTotal = sumAmounts(transactions.filter(isRecurring));
-  const sorted = [...transactions].sort((a, b) => (a.date < b.date ? 1 : -1));
+  // Compras mais recentes primeiro (1/9 de agora antes de 2/3 do mês passado; fixos antigos no fim).
+  const sorted = [...transactions].sort(byRecentPurchase);
   const spentByPerson = people
     .map(p => ({ person: p, total: sumAmounts(monthTransactions.filter(t => t.personId === p.id)) }))
     .filter(x => x.total > 0);

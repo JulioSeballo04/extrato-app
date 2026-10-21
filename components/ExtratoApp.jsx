@@ -209,11 +209,19 @@ export default function ExtratoApp({ spacesApi }) {
 
   // Números do topo (respeitam o filtro de pessoa).
   const scopePeople = filterPerson === 'all' ? people : people.filter(p => p.id === filterPerson);
+  // Sobra/Falta compara só quem tem salário: os gastos dessas pessoas com o salário delas.
   const overview = scopePeople.reduce((acc, p) => {
     const t = personTotal(p.id, selectedMonth);
-    acc.cardSum += t.cardSum; acc.otherSum += t.otherSum; acc.salary += Number(p.salary) || 0;
+    acc.cardSum += t.cardSum; acc.otherSum += t.otherSum;
+    const salary = Number(p.salary) || 0;
+    if (salary > 0) { acc.salary += salary; acc.salariedSpent += t.total; }
     return acc;
-  }, { cardSum: 0, otherSum: 0, salary: 0 });
+  }, { cardSum: 0, otherSum: 0, salary: 0, salariedSpent: 0 });
+  // "Ver gastos de": só quem tem salário cadastrado.
+  const salariedPeople = people.filter(p => (Number(p.salary) || 0) > 0);
+  // Se o salário de quem está filtrado for apagado, o botão some: volta para "Todos".
+  const filterStillValid = filterPerson === 'all' || salariedPeople.some(p => p.id === filterPerson);
+  useEffect(() => { if (!filterStillValid) setFilterPerson('all'); }, [filterStillValid]);
   const billsPaid = sumAmounts(monthBills.filter(b => b.paid));
   const billsTotal = sumAmounts(monthBills);
 
@@ -661,11 +669,11 @@ export default function ExtratoApp({ spacesApi }) {
           )}
         </div>
 
-        {people.length > 1 && (
+        {people.length > 1 && salariedPeople.length > 0 && (
           <div className="no-print" role="group" aria-label="Ver gastos de" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
             <span className="hint" style={{ marginRight: '0.2rem' }}>Ver gastos de</span>
             <button className="chip" aria-pressed={filterPerson === 'all'} onClick={() => setFilterPerson('all')}>Todos</button>
-            {people.map(p => (
+            {salariedPeople.map(p => (
               <PersonChip key={p.id} person={p} color={personColor(p.id)} pressed={filterPerson === p.id}
                 onClick={() => setFilterPerson(filterPerson === p.id ? 'all' : p.id)} />
             ))}
@@ -728,7 +736,7 @@ export default function ExtratoApp({ spacesApi }) {
           <MonthOverview
             spent={overview.cardSum + overview.otherSum} cardSum={overview.cardSum} otherSum={overview.otherSum}
             paid={billsPaid} toPay={billsTotal - billsPaid} billsTotal={billsTotal} overdueCount={billsOverdue} pendingCount={monthBills.length - billsPaidCount}
-            salary={overview.salary} monthName={monthLabel(selectedMonth).split(' ')[0]} onOpenBills={() => { setOpenPanel('bills'); scrollToSection('top'); }}
+            salary={overview.salary} salariedSpent={overview.salariedSpent} monthName={monthLabel(selectedMonth).split(' ')[0]} onOpenBills={() => { setOpenPanel('bills'); scrollToSection('top'); }}
           />
         )}
 
