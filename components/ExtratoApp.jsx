@@ -450,6 +450,32 @@ export default function ExtratoApp({ spacesApi }) {
     });
   }
 
+  // Parcelas que faltam numa compra (de cada pessoa, se for dividida), a partir
+  // da editada (ou da 1ª, na compra inteira): copiam a parcela mais próxima da
+  // mesma pessoa, já com a edição, na data do mês certo.
+  function missingInstallments(items, item, scope, clean, shared, dateShift) {
+    const total = item.installmentTotal;
+    const first = scope === 'next' ? item.installmentNumber : 1;
+    const out = [];
+    for (const personId of new Set(items.map(x => x.personId))) {
+      const mine = items.filter(x => x.personId === personId && x.installmentTotal === total);
+      const has = new Set(mine.map(x => Number(x.installmentNumber)));
+      for (let n = first; n <= total; n++) {
+        if (has.has(n)) continue;
+        const base = mine.reduce((a, b) => (Math.abs(b.installmentNumber - n) < Math.abs(a.installmentNumber - n) ? b : a));
+        const { id, coll: _c, paidMonths, ...rest } = base;
+        const { date: _d, personId: _p, fixed: _f, ...edits } = base.id === item.id ? clean : shared;
+        const date = dateShift ? monthsLaterDate(clean.date, n - item.installmentNumber)
+          : monthsLaterDate(base.date, n - base.installmentNumber);
+        out.push({
+          ...rest, ...edits, id: newId(), createdBy: user?.uid, installmentNumber: n, paid: false, date,
+          ...(paidMonths ? { paidMonths: [] } : {}),
+        });
+      }
+    }
+    return out;
+  }
+
   function updateEntry(coll, item, patch, scope = 'one') {
     if (patch.rebuild) { rebuildPurchase(coll, item, patch); return; }
     const clean = {
@@ -520,31 +546,45 @@ export default function ExtratoApp({ spacesApi }) {
       return;
     }
     const items = entriesInScope(entriesOf(coll), item, scope);
+    // Parcelas: o que mudou vale também para as seguintes. Mudar a data muda a
+    // de todas (mantém um mês entre elas), e a parcela que faltar em algum mês
+    // (apagada sem querer, por exemplo) é criada de novo, já com a edição.
+    const isPurchase = item.installmentTotal > 1 && (scope === 'next' || scope === 'all');
+    const dateShift = isPurchase && clean.date !== item.date;
+    const changesFor = x => (x.id === item.id ? clean
+      : dateShift && x.installmentTotal > 1 ? { ...shared, date: monthsLaterDate(clean.date, x.installmentNumber - item.installmentNumber) } : shared);
+    const created = isPurchase ? missingInstallments(items, item, scope, clean, shared, dateShift) : [];
+    if (created.length) {
+      write(store.setMany(targetColl, created.map(x => withVisibility(moving ? reshape(x, {}) : x))));
+    }
+    const createdNote = created.length === 0 ? ''
+      : created.length === 1 ? ' A parcela que faltava foi criada.' : ` ${created.length} parcelas que faltavam foram criadas.`;
     if (visibilityChanged) {
       // Ocultar ou mostrar de novo: o lançamento muda de lugar (hiddenEntries).
       for (const x of items) {
-        const changes = x.id === item.id ? clean : shared;
+        const changes = changesFor(x);
         const next = withVisibility(moving ? reshape(x, changes) : { ...x, ...changes });
         write(store.relocate(coll, targetColl, x, next, user?.uid));
       }
-      setToast({ text: newVisibleTo ? `“${clean.description}”: ${visibilityLabel({ visibleTo: newVisibleTo }).toLowerCase()}.` : `“${clean.description}” voltou a aparecer para todos.` });
+      setToast({ text: (newVisibleTo ? `“${clean.description}”: ${visibilityLabel({ visibleTo: newVisibleTo }).toLowerCase()}.` : `“${clean.description}” voltou a aparecer para todos.`) + createdNote });
       return;
     }
     if (!moving) {
       for (const x of items) {
-        if (x.id === item.id) write(store.update(coll, x, clean));
-        else if (Object.keys(shared).length) write(store.update(coll, x, shared));
+        const changes = changesFor(x);
+        if (x.id === item.id || Object.keys(changes).length) write(store.update(coll, x, changes));
       }
+      if (createdNote) setToast({ text: `“${clean.description}”:${createdNote}` });
       return;
     }
     if (targetColl === coll) {
       // De um cartão para outro (ou para uma pessoa a pagar): só troca o cardId.
-      for (const x of items) write(store.update(coll, x, { ...(x.id === item.id ? clean : shared), cardId: target }));
+      for (const x of items) write(store.update(coll, x, { ...changesFor(x), cardId: target }));
     } else {
       // Entre cartão e "fora do cartão": muda de coleção, no mesmo lote.
-      write(store.move(coll, targetColl, items.map(x => ownAuthor(reshape(x, x.id === item.id ? clean : shared)))));
+      write(store.move(coll, targetColl, items.map(x => ownAuthor(reshape(x, changesFor(x))))));
     }
-    setToast({ text: `“${clean.description}” agora é ${targetName}${items.length > 1 ? ` (${items.length} lançamentos)` : ''}.` });
+    setToast({ text: `“${clean.description}” agora é ${targetName}${items.length > 1 ? ` (${items.length} lançamentos)` : ''}.${createdNote}` });
   }
   // Listas de gastos fora do cartão.
   function renameGroup(id, name) {
