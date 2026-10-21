@@ -1,9 +1,9 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Pencil, Trash2, Check, ChevronDown, EyeOff, ArrowDownUp } from 'lucide-react';
+import { Pencil, Trash2, Check, ChevronDown, EyeOff, ArrowDownUp, ArrowDown, ArrowUp } from 'lucide-react';
 import { Dot, Tag, Sheet, MoneyInput } from '../ui';
-import { CATEGORIES, DEFAULT_CATEGORY, money, parseAmount, amountInput, fmtDate, isRecurring, defaultDateFor, changeScopes, splitAmount, purchasePlan, PAYMENT_METHODS, methodLabel, parseTarget, outsideTarget, DEFAULT_GROUP, ENTRY_SORTS, sortEntries, shownDate, isPayee, invoiceKeyOf, invoiceDueDate, invoiceName, monthLabel } from '../../lib/ledger';
+import { CATEGORIES, DEFAULT_CATEGORY, money, parseAmount, amountInput, fmtDate, isRecurring, defaultDateFor, changeScopes, splitAmount, purchasePlan, PAYMENT_METHODS, methodLabel, parseTarget, outsideTarget, DEFAULT_GROUP, ENTRY_SORTS, sortEntries, shownDate, isSortKey, isPayee, invoiceKeyOf, invoiceDueDate, invoiceName, monthLabel } from '../../lib/ledger';
 
 export const OUTSIDE_CARD = 'outside';
 
@@ -355,14 +355,24 @@ function InvoiceHint({ card, date }) {
   );
 }
 
-// "Ordenar por: [Data] [Valor] [Parcelas recentes]"
-export function SortPicker({ sort, onChange }) {
+// "Ordenar por: [Data] [Valor] [Parcelas recentes]". Tocar em "Data" de novo
+// inverte o sentido (mais nova ↔ mais antiga primeiro); `dateFirst` é o
+// sentido ao escolher "Data" vindo de outra ordem.
+export function SortPicker({ sort, onChange, dateFirst = 'date' }) {
+  const onDate = sort === 'date' || sort === 'date-asc';
   return (
     <div role="group" aria-label="Ordenar lançamentos" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap', marginBottom: '0.35rem' }}>
       <span className="hint" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><ArrowDownUp size={12} aria-hidden="true" />Ordenar por</span>
-      {ENTRY_SORTS.map(o => (
+      {ENTRY_SORTS.map(o => (o.key === 'date' ? (
+        <button key={o.key} type="button" className="chip" aria-pressed={onDate}
+          onClick={() => onChange(!onDate ? dateFirst : sort === 'date' ? 'date-asc' : 'date')}
+          title={onDate ? 'Toque para inverter' : undefined}>
+          {onDate ? (sort === 'date' ? <ArrowDown size={13} aria-hidden="true" /> : <ArrowUp size={13} aria-hidden="true" />) : null}
+          {onDate ? (sort === 'date' ? 'Data: mais nova' : 'Data: mais antiga') : o.label}
+        </button>
+      ) : (
         <button key={o.key} type="button" className="chip" aria-pressed={sort === o.key} onClick={() => onChange(o.key)}>{o.label}</button>
-      ))}
+      )))}
     </div>
   );
 }
@@ -371,7 +381,7 @@ const SORT_KEY = 'gestor-de-gastos:ordem:';
 export function savedSort(scope, fallback) {
   try {
     const v = localStorage.getItem(SORT_KEY + scope);
-    return ENTRY_SORTS.some(o => o.key === v) ? v : fallback;
+    return isSortKey(v) ? v : fallback;
   } catch { return fallback; }
 }
 export function rememberSort(scope, key) {

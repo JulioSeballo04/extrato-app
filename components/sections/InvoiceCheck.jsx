@@ -19,20 +19,14 @@ export default function InvoiceCheck({ card, items, selectedMonth, title, person
     storeCheck(key, next);
   }
 
-  // Ordem escolhida (lembrada no aparelho). "Data" aqui vai da mais antiga para
-  // a mais nova, como na fatura do banco; valor e parcelas recentes, como na lista.
-  const [sort, setSort] = useState(() => savedSort('conferir', 'date'));
+  // Ordem escolhida (lembrada no aparelho). Começa pela data mais antiga, como
+  // na fatura do banco. (Chave nova: antes, "date" aqui era a mais antiga.)
+  const [sort, setSort] = useState(() => savedSort('checklist', 'date-asc'));
   function chooseSort(k) {
     setSort(k);
-    rememberSort('conferir', k);
+    rememberSort('checklist', k);
   }
-  const list = sort === 'date'
-    ? [...items].sort((a, b) => {
-      const da = shownDate(a, selectedMonth, card);
-      const db = shownDate(b, selectedMonth, card);
-      return da !== db ? (da < db ? -1 : 1) : String(a.description).localeCompare(String(b.description), 'pt-BR');
-    })
-    : sortEntries(items, sort, selectedMonth, () => card);
+  const list = sortEntries(items, sort, selectedMonth, () => card);
   // Ignora marcações de lançamentos que já não estão nesta fatura (apagados, editados).
   const checked = new Set(saved.ids.filter(id => list.some(t => t.id === id)));
   const total = sumAmounts(list);
@@ -72,7 +66,7 @@ export default function InvoiceCheck({ card, items, selectedMonth, title, person
         <div style={{ height: '100%', width: `${list.length ? (checked.size / list.length) * 100 : 0}%`, background: 'var(--success)', transition: 'width 0.2s' }} />
       </div>
 
-      {list.length > 1 && <SortPicker sort={sort} onChange={chooseSort} />}
+      {list.length > 1 && <SortPicker sort={sort} onChange={chooseSort} dateFirst="date-asc" />}
       {list.length === 0 && <p className="muted">Nada lançado nesta fatura.</p>}
       <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
         {list.map(t => {
