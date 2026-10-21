@@ -265,7 +265,8 @@ export function EntryList({ items, people, cards = [], groups = [], members = []
   const [sort, setSort] = useState(() => savedSort(sortScope, defaultSort));
 
   if (items.length === 0) return <p className="muted">{emptyText}</p>;
-  const sorted = sortEntries(items, sort, selectedMonth);
+  const cardOf = id => (id ? cards.find(c => c.id === id) : null);
+  const sorted = sortEntries(items, sort, selectedMonth, cardOf);
   function chooseSort(key) {
     setSort(key);
     rememberSort(sortScope, key);
@@ -305,7 +306,7 @@ export function EntryList({ items, people, cards = [], groups = [], members = []
             </div>
             <div className="row-line" style={{ gap: '0.4rem' }}>
               <span className="mono" style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-                {fmtDate(shownDate(t, selectedMonth))}
+                {fmtDate(shownDate(t, selectedMonth, cardOf(t.cardId)))}
               </span>
               <Dot color={personColor(t.personId)} />
               <span style={{ color: 'var(--text-dim)', fontSize: '0.8rem' }}>{personName(t.personId)}</span>

@@ -20,8 +20,8 @@ export default function InvoiceCheck({ card, items, selectedMonth, title, person
 
   // Na ordem da fatura do banco: data mais antiga primeiro.
   const list = [...items].sort((a, b) => {
-    const da = shownDate(a, selectedMonth);
-    const db = shownDate(b, selectedMonth);
+    const da = shownDate(a, selectedMonth, card);
+    const db = shownDate(b, selectedMonth, card);
     return da !== db ? (da < db ? -1 : 1) : String(a.description).localeCompare(String(b.description), 'pt-BR');
   });
   // Ignora marcações de lançamentos que já não estão nesta fatura (apagados, editados).
@@ -78,7 +78,7 @@ export default function InvoiceCheck({ card, items, selectedMonth, title, person
                     {isRecurring(t) && <span className="hint"> · fixo</span>}
                   </span>
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                    <span className="mono">{fmtDate(shownDate(t, selectedMonth))}</span>
+                    <span className="mono">{fmtDate(shownDate(t, selectedMonth, card))}</span>
                     <Dot color={personColor(t.personId)} />{personName(t.personId)}
                   </span>
                 </span>
