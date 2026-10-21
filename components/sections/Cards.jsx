@@ -9,7 +9,7 @@ import { money, parseAmount, amountInput, monthLabel, matchesMonth, isRecurring,
 
 export default function CardsSection({
   cards, people, cardTransactions, filterPerson, selectedMonth, expandedCard, setExpandedCard,
-  onAddCard, onRemoveCard, onUpdateCard, onToggleInvoice, onNewEntry, onRemoveTx, onUpdateTx,
+  onAddCard, onRemoveCard, onUpdateCard, onToggleInvoice, onNewEntry, onRemoveTx, onUpdateTx, purchaseInfo,
   personName, personColor, authorName, members, visibilityLabel, groups, cardGradients, readOnly, formOpen, setFormOpen,
 }) {
   const [name, setName] = useState('');
@@ -217,7 +217,7 @@ export default function CardsSection({
           card={activeCard} cards={cards} allTransactions={cardTransactions} people={people} selectedMonth={selectedMonth}
           monthTransactions={cardTransactions.filter(t => entryInInvoice(activeCard, t, selectedMonth))}
           filterPerson={filterPerson}
-          onNewEntry={onNewEntry} onRemoveTx={onRemoveTx} onUpdateTx={onUpdateTx} authorName={authorName}
+          onNewEntry={onNewEntry} onRemoveTx={onRemoveTx} onUpdateTx={onUpdateTx} purchaseInfo={purchaseInfo} authorName={authorName}
           members={members} visibilityLabel={visibilityLabel} groups={groups}
           onUpdateCard={onUpdateCard} onToggleInvoice={onToggleInvoice}
           personName={personName} personColor={personColor} readOnly={readOnly}
@@ -310,7 +310,7 @@ function PayeeTile({ payee, owed, entryCount, selectedMonth, expanded, onToggle,
   );
 }
 
-function CardLedger({ card, cards, allTransactions, people, monthTransactions, filterPerson, selectedMonth, onNewEntry, onRemoveTx, onUpdateTx, onUpdateCard, onToggleInvoice, personName, personColor, authorName, members, visibilityLabel, groups, readOnly }) {
+function CardLedger({ card, cards, allTransactions, people, monthTransactions, filterPerson, selectedMonth, onNewEntry, onRemoveTx, onUpdateTx, purchaseInfo, onUpdateCard, onToggleInvoice, personName, personColor, authorName, members, visibilityLabel, groups, readOnly }) {
   const ref = useRef(null);
   // Ao abrir um cartão, traz os lançamentos para a tela (no celular ficam lá embaixo).
   useEffect(() => {
@@ -403,7 +403,7 @@ function CardLedger({ card, cards, allTransactions, people, monthTransactions, f
       )}
 
       <EntryList
-        items={sorted} people={people} cards={cards} groups={groups} readOnly={readOnly}
+        items={sorted} people={people} cards={cards} groups={groups} purchaseInfo={purchaseInfo} readOnly={readOnly}
         // Parcela no cartão: marca se aquela parcela já foi quitada (não vence sozinha; quem vence é a fatura).
         // A parcela no cartão segue a fatura do mês: paga quando a fatura foi paga
         // (ou quando foi lançada como "já paga"). Pessoa a pagar: o "pago" é do mês.

@@ -10,7 +10,7 @@ import { money, monthLabel, matchesMonth, isRecurring, isPaidIn, dueDateIn, entr
 // renomear e criar outras, ex.: "Casa", "Carro").
 export default function OtherExpensesSection({
   group, isDefault, expenses, people, cards, groups, filterPerson, selectedMonth, onNewEntry, onRemove, onUpdate, onTogglePaid,
-  personName, personColor, authorName, members, visibilityLabel, readOnly, onRename, onRemoveGroup,
+  personName, personColor, authorName, members, visibilityLabel, readOnly, onRename, onRemoveGroup, purchaseInfo,
 }) {
   const [onlyFixed, setOnlyFixed] = useState(false);
   const [renaming, setRenaming] = useState(null); // texto do novo nome
@@ -78,7 +78,7 @@ export default function OtherExpensesSection({
       )}
 
       <EntryList
-        items={filtered} people={people} cards={cards} groups={groups} readOnly={readOnly}
+        items={filtered} people={people} cards={cards} groups={groups} purchaseInfo={purchaseInfo} readOnly={readOnly}
         status={e => (
           <StatusBadge status={entryStatus(isPaidIn(e, selectedMonth), dueDateIn(e, selectedMonth))} readOnly={readOnly}
             onToggle={() => onTogglePaid(e.id, selectedMonth)} />

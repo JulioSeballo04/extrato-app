@@ -8,7 +8,7 @@ import { readPendingInvite, clearPendingInvite } from '../lib/invite';
 import { BRAND } from '../lib/brand';
 import { PALETTES, AUTO_PALETTE, DEFAULT_PALETTE, resolvePaletteKey, paletteVars, writeCachedPalette, systemPrefersDark } from '../lib/theme';
 import {
-  DEFAULT_CATEGORY, monthLabel, capitalize, currentMonth, shiftMonth, monthsLaterDate, matchesMonth, isRecurring, isPaidIn,
+  DEFAULT_CATEGORY, money, monthLabel, capitalize, currentMonth, shiftMonth, monthsLaterDate, matchesMonth, isRecurring, isPaidIn,
   isInvoicePaid, parseDueDay, sumAmounts, buildMonthBills, isPayee, DEFAULT_GROUP, groupOf, parseTarget, methodLabel, splitAmount, entriesInScope, dueDateIn,
 } from '../lib/ledger';
 import { APP_CSS } from './appStyles';
@@ -405,7 +405,53 @@ export default function ExtratoApp({ spacesApi }) {
   // Edição. Descrição, categoria e valor valem para todo o alcance escolhido;
   // data, pessoa e "fixo" só para o lançamento editado (senão as partes de uma
   // compra dividida virariam da mesma pessoa).
+  // A compra inteira a que um lançamento pertence (todas as parcelas e as partes
+  // de quem divide) e os números dela, para "Corrigir parcelamento".
+  function purchaseInfo(item) {
+    const coll = item.cardId ? 'cardTransactions' : 'otherExpenses';
+    const all = entriesInScope(entriesOf(coll), item, 'all');
+    return {
+      total: Math.round(sumAmounts(all) * 100) / 100,
+      count: item.installmentTotal > 1 ? item.installmentTotal : 1,
+      current: item.installmentTotal > 1 ? item.installmentNumber : 1,
+      people: [...new Set([item.personId, ...all.map(x => x.personId)])],
+    };
+  }
+
+  // Refaz a compra com outro parcelamento: apaga as parcelas antigas e gera as
+  // novas (esta linha vira a parcela `current`, na mesma data; as anteriores
+  // ficam como já pagas). Mantém quem divide, cartão/lista, forma e ocultação.
+  function rebuildPurchase(coll, item, patch) {
+    const old = entriesInScope(entriesOf(coll), item, 'all');
+    const info = purchaseInfo(item);
+    const count = Math.max(1, Math.min(480, Math.floor(Number(patch.rebuild.count)) || 1));
+    const current = Math.max(1, Math.min(count, Math.floor(Number(patch.rebuild.current)) || 1));
+    const total = Number(patch.rebuild.total) || info.total;
+    const extra = {
+      ...(item.cardId ? { cardId: item.cardId } : { groupId: item.groupId || DEFAULT_GROUP, ...(item.method ? { method: item.method } : {}) }),
+      ...(item.visibleTo?.length ? { visibleTo: item.visibleTo } : {}),
+    };
+    const fresh = buildEntries({
+      description: patch.description?.trim() || item.description,
+      amount: total,
+      personId: info.people[0],
+      splitWith: info.people.slice(1),
+      date: patch.date || item.date,
+      category: patch.category || item.category,
+      fixed: false,
+      installments: count,
+      paidInstallments: current - 1,
+    }, extra);
+    write(store.removeMany(old.map(x => [coll, x.id])));
+    write(store.setMany(coll, fresh));
+    setToast({
+      text: `“${item.description}” refeito: ${count > 1 ? `${count}x de ${money(total / info.people.length / count)}` : `à vista, ${money(total)}`}.`,
+      action: { label: 'Desfazer', run: () => { write(store.removeMany(fresh.map(x => [coll, x.id]))); write(store.setMany(coll, old.map(ownAuthor))); } },
+    });
+  }
+
   function updateEntry(coll, item, patch, scope = 'one') {
+    if (patch.rebuild) { rebuildPurchase(coll, item, patch); return; }
     const clean = {
       description: patch.description?.trim() || item.description,
       amount: Number(patch.amount) || 0,
@@ -746,7 +792,7 @@ export default function ExtratoApp({ spacesApi }) {
               cards={cards} people={people} cardTransactions={cardTransactions}
               filterPerson={filterPerson} selectedMonth={selectedMonth} expandedCard={expandedCard} setExpandedCard={setExpandedCard}
               onAddCard={addCard} onRemoveCard={removeCard} onUpdateCard={updateCard} onToggleInvoice={toggleInvoicePaid}
-              onNewEntry={openEntryForm} onRemoveTx={(t, scope) => removeEntry('cardTransactions', t, scope)} onUpdateTx={(t, patch, scope) => updateEntry('cardTransactions', t, patch, scope)} authorName={authorName} members={otherMembers} visibilityLabel={visibilityLabel} groups={groups}
+              onNewEntry={openEntryForm} onRemoveTx={(t, scope) => removeEntry('cardTransactions', t, scope)} onUpdateTx={(t, patch, scope) => updateEntry('cardTransactions', t, patch, scope)} purchaseInfo={purchaseInfo} authorName={authorName} members={otherMembers} visibilityLabel={visibilityLabel} groups={groups}
               personName={personName} personColor={personColor} cardGradients={pal.cardGradients} readOnly={readOnly}
               formOpen={cardFormOpen} setFormOpen={setCardFormOpen}
             />
@@ -758,7 +804,7 @@ export default function ExtratoApp({ spacesApi }) {
             {groups.map(g => (
               <OtherExpensesSection key={g.id} group={g} isDefault={g.id === DEFAULT_GROUP}
                 expenses={otherExpenses.filter(e => groupOf(e, groupIds) === g.id)} people={people} filterPerson={filterPerson} selectedMonth={selectedMonth}
-                cards={cards} groups={groups} onNewEntry={openEntryForm} onRemove={(e, scope) => removeEntry('otherExpenses', e, scope)} onUpdate={(e, patch, scope) => updateEntry('otherExpenses', e, patch, scope)} onTogglePaid={toggleOtherExpensePaid} authorName={authorName} members={otherMembers} visibilityLabel={visibilityLabel}
+                cards={cards} groups={groups} onNewEntry={openEntryForm} onRemove={(e, scope) => removeEntry('otherExpenses', e, scope)} onUpdate={(e, patch, scope) => updateEntry('otherExpenses', e, patch, scope)} onTogglePaid={toggleOtherExpensePaid} purchaseInfo={purchaseInfo} authorName={authorName} members={otherMembers} visibilityLabel={visibilityLabel}
                 personName={personName} personColor={personColor} readOnly={readOnly}
                 onRename={name => renameGroup(g.id, name)} onRemoveGroup={() => removeGroup(g.id)}
               />
