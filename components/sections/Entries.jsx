@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { Pencil, Trash2, Check, ChevronDown, EyeOff, ArrowDownUp, ArrowDown, ArrowUp } from 'lucide-react';
 import { Dot, Tag, Sheet, MoneyInput } from '../ui';
-import { CATEGORIES, DEFAULT_CATEGORY, money, parseAmount, amountInput, fmtDate, isRecurring, defaultDateFor, changeScopes, splitAmount, purchasePlan, PAYMENT_METHODS, methodLabel, parseTarget, outsideTarget, DEFAULT_GROUP, ENTRY_SORTS, sortEntries, shownDate, isSortKey, isPayee, invoiceKeyOf, invoiceDueDate, invoiceName, monthLabel } from '../../lib/ledger';
+import { CATEGORIES, DEFAULT_CATEGORY, money, parseAmount, amountInput, fmtDate, isRecurring, defaultDateFor, changeScopes, splitAmount, purchasePlan, PAYMENT_METHODS, methodLabel, parseTarget, outsideTarget, DEFAULT_GROUP, ENTRY_SORTS, sortEntries, shownDate, isSortKey, isPayee, invoiceKeyOf, invoiceDueDate, invoiceName, monthLabel, dueDateIn, monthsLaterDate } from '../../lib/ledger';
 
 export const OUTSIDE_CARD = 'outside';
 
@@ -297,7 +297,7 @@ export function EntryList({ items, people, cards = [], groups = [], members = []
       {items.length > 1 && <SortPicker sort={sort} onChange={chooseSort} />}
       {sorted.map(t => (
         editingId === t.id ? (
-          <EditRow key={t.id} item={t} people={people} cards={cards} groups={groups} members={members} purchaseInfo={purchaseInfo} onSave={patch => save(t, patch)} onCancel={() => setEditingId(null)} />
+          <EditRow key={t.id} item={t} selectedMonth={selectedMonth} people={people} cards={cards} groups={groups} members={members} purchaseInfo={purchaseInfo} onSave={patch => save(t, patch)} onCancel={() => setEditingId(null)} />
         ) : (
           <div key={t.id} className="row">
             <div className="row-line" style={{ flexWrap: 'nowrap', alignItems: 'baseline' }}>
@@ -410,7 +410,7 @@ function ScopeChooser({ asking, onChoose, onCancel }) {
 
 // Edição na linha: Enter salva, Esc cancela. Dá para mudar também a forma de
 // pagamento (outro cartão, pessoa a pagar ou fora do cartão) e a data.
-function EditRow({ item, people, cards, groups = [], members = [], purchaseInfo, onSave, onCancel }) {
+function EditRow({ item, selectedMonth, people, cards, groups = [], members = [], purchaseInfo, onSave, onCancel }) {
   const [draft, setDraft] = useState({
     description: item.description, amount: amountInput(item.amount), personId: item.personId,
     date: item.date, fixed: !!item.fixed, category: item.category || DEFAULT_CATEGORY,
@@ -422,15 +422,28 @@ function EditRow({ item, people, cards, groups = [], members = [], purchaseInfo,
   const set = patch => { setError(''); setDraft(d => ({ ...d, ...patch })); };
   const isInstallment = item.installmentTotal > 1;
   // "Corrigir parcelamento": refaz a compra inteira com outro número de parcelas.
+  // Num fixo (ex.: consórcio), "Transformar em parcelas": a parcela atual fica
+  // no mês exibido. Por padrão informa-se o valor da parcela e o app calcula o total.
   const info = purchaseInfo?.(item);
+  const fixedItem = !!item.fixed;
   const [fixing, setFixing] = useState(false);
   const [plan, setPlan] = useState(() => ({
-    total: amountInput(info?.total || item.amount), count: String(info?.count || 1), current: String(info?.current || 1),
+    total: amountInput(info ? info.total / info.count : item.amount),
+    count: fixedItem ? '' : String(info?.count || 1), current: String(info?.current || 1),
+    by: 'each', // valor informado: de cada parcela ('each') ou o total da compra
   }));
   const setPlanField = p => { setError(''); setPlan(x => ({ ...x, ...p })); };
   const planCount = Math.max(1, Math.floor(Number(plan.count)) || 1);
   const planCurrent = Math.min(planCount, Math.max(1, Math.floor(Number(plan.current)) || 1));
-  const planEach = parseAmount(plan.total) / (info?.uneven ? 1 : info?.people.length || 1) / planCount;
+  const planTotal = plan.by === 'each' ? Math.round(parseAmount(plan.total) * planCount * 100) / 100 : parseAmount(plan.total);
+  const planEach = planTotal / (info?.uneven ? 1 : info?.people.length || 1) / planCount;
+  const planDate = fixedItem && draft.date === item.date && selectedMonth ? dueDateIn(item, selectedMonth) : draft.date;
+  function setPlanBy(by) {
+    if (by === plan.by) return;
+    const v = parseAmount(plan.total);
+    const next = by === 'each' ? v / planCount : v * planCount;
+    setPlanField({ by, total: v ? amountInput(Math.round(next * 100) / 100) : '' });
+  }
   const targetCard = cards.find(c => c.id === draft.target);
   const realCards = cards.filter(c => c.kind !== 'payee');
   const payees = cards.filter(c => c.kind === 'payee');
@@ -438,9 +451,10 @@ function EditRow({ item, people, cards, groups = [], members = [], purchaseInfo,
   function submit(e) {
     e.preventDefault();
     if (fixing) {
-      if (!(parseAmount(plan.total) > 0)) { setError('Informe o valor total da compra.'); return; }
+      if (!(planTotal > 0)) { setError(plan.by === 'each' ? 'Informe o valor da parcela.' : 'Informe o valor total da compra.'); return; }
+      if (fixedItem && !(Number(plan.count) > 1)) { setError('Informe em quantas parcelas é.'); return; }
       if (Number(plan.current) > planCount) { setError('A parcela atual não pode passar do número de parcelas.'); return; }
-      onSave({ ...draft, rebuild: { total: parseAmount(plan.total), count: planCount, current: planCurrent } });
+      onSave({ ...draft, date: planDate, rebuild: { total: planTotal, count: planCount, current: planCurrent } });
       return;
     }
     const amount = parseAmount(draft.amount);
@@ -498,21 +512,24 @@ function EditRow({ item, people, cards, groups = [], members = [], purchaseInfo,
         </label>
       </div>
       <p className="hint" style={{ margin: '0.5rem 0 0' }}>{payHint}</p>
-      {info && !draft.fixed && !item.fixed && (
+      {info && (fixedItem || !draft.fixed) && (
         <div style={{ marginTop: '0.6rem' }}>
           <button type="button" className={`ghost${fixing ? ' active' : ''}`} onClick={() => setFixing(f => !f)} aria-expanded={fixing}>
-            {fixing ? 'Cancelar correção do parcelamento' : 'Corrigir parcelamento'}
+            {fixing ? 'Cancelar' : fixedItem ? 'Transformar em parcelas' : 'Corrigir parcelamento'}
           </button>
           {fixing && (
             <div style={{ marginTop: '0.6rem', padding: '0.6rem', borderRadius: 10, border: '1px solid var(--border-strong)' }}>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.6rem' }}>
                 <label className="field">
-                  Valor total da compra
+                  {plan.by === 'each' ? `Valor da parcela${info.people.length > 1 ? ' (somando todos)' : ''}` : 'Valor total da compra'}
                   <MoneyInput value={plan.total} onChange={v => setPlanField({ total: v })} />
+                  <button type="button" className="ghost" style={{ alignSelf: 'flex-start', fontSize: '0.75rem', padding: '0.2rem 0.5rem' }} onClick={() => setPlanBy(plan.by === 'each' ? 'total' : 'each')}>
+                    {plan.by === 'each' ? 'Prefiro informar o total' : 'Prefiro informar a parcela'}
+                  </button>
                 </label>
                 <label className="field">
                   Número de parcelas
-                  <input type="number" inputMode="numeric" min="1" max="480" value={plan.count} onChange={e => setPlanField({ count: e.target.value })} />
+                  <input type="number" inputMode="numeric" min="1" max="480" value={plan.count} placeholder={fixedItem ? 'Ex.: 100' : undefined} onChange={e => setPlanField({ count: e.target.value })} />
                 </label>
                 <label className="field">
                   Esta é a parcela nº
@@ -521,9 +538,9 @@ function EditRow({ item, people, cards, groups = [], members = [], purchaseInfo,
               </div>
               <p className="hint" style={{ margin: '0.5rem 0 0' }}>
                 {planCount > 1
-                  ? <>Vai refazer a compra em <strong>{planCount}x</strong> de <strong className="mono">{money(planEach)}</strong>{info.people.length > 1 ? (info.uneven ? ` no total (dividida entre ${info.people.length}, na mesma proporção de hoje)` : ` por pessoa (dividida entre ${info.people.length})`) : ''}: esta linha vira a parcela {planCurrent}/{planCount} em {fmtDate(draft.date)}{planCurrent > 1 ? `, e as ${planCurrent - 1} anteriores ficam como já pagas` : ''}.</>
-                  : <>Vai virar uma compra à vista de <strong className="mono">{money(parseAmount(plan.total))}</strong>.</>}
-                {' '}As parcelas atuais são substituídas (dá para desfazer).
+                  ? <>{fixedItem ? 'Deixa de ser fixo e vira' : 'Vai refazer a compra em'} <strong>{planCount}x</strong> de <strong className="mono">{money(planEach)}</strong>{info.people.length > 1 ? (info.uneven ? ` no total (dividida entre ${info.people.length}, na mesma proporção de hoje)` : ` por pessoa (dividida entre ${info.people.length})`) : ''}: esta linha vira a parcela {planCurrent}/{planCount} em {fmtDate(planDate)}{planCurrent > 1 ? `, e as ${planCurrent - 1} anteriores ficam como já pagas` : ''}{planCount > planCurrent ? `; a última em ${monthLabel(monthsLaterDate(planDate, planCount - planCurrent).slice(0, 7))}` : ''}. Valor total: <strong className="mono">{money(planTotal)}</strong>.</>
+                  : <>Vai virar uma compra à vista de <strong className="mono">{money(planTotal)}</strong>.</>}
+                {' '}{fixedItem ? 'O gasto fixo é substituído pelas parcelas' : 'As parcelas atuais são substituídas'} (dá para desfazer).
               </p>
             </div>
           )}

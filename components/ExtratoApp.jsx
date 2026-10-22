@@ -440,7 +440,8 @@ export default function ExtratoApp({ spacesApi }) {
   // Refaz a compra com outro parcelamento: apaga as parcelas antigas e gera as
   // novas (esta linha vira a parcela `current`, na mesma data; as anteriores
   // ficam como já pagas). Mantém quem divide (na mesma proporção), cartão/lista,
-  // forma e ocultação.
+  // forma e ocultação. Um fixo (ex.: consórcio lançado como fixo) vira parcelado
+  // do mesmo jeito; se o mês da parcela atual já estava pago, ela fica paga.
   function rebuildPurchase(coll, item, patch) {
     const old = entriesInScope(entriesOf(coll), item, 'all');
     const info = purchaseInfo(item);
@@ -462,11 +463,15 @@ export default function ExtratoApp({ spacesApi }) {
       fixed: false,
       installments: count,
       paidInstallments: current - 1,
-    }, extra);
+    }, extra).map(x => {
+      if (!item.fixed || x.installmentNumber !== current) return x;
+      const was = old.find(o => o.personId === x.personId);
+      return was && isPaidIn(was, x.date.slice(0, 7)) ? { ...x, paid: true } : x;
+    });
     write(store.removeMany(old.map(x => [coll, x.id])));
     write(store.setMany(coll, fresh));
     setToast({
-      text: `“${item.description}” refeito: ${count > 1 ? `${count}x de ${money(total / (info.uneven ? 1 : info.people.length) / count)}${info.uneven ? ' no total' : ''}` : `à vista, ${money(total)}`}.`,
+      text: `“${item.description}” ${item.fixed ? 'virou parcelado' : 'refeito'}: ${count > 1 ? `${count}x de ${money(total / (info.uneven ? 1 : info.people.length) / count)}${info.uneven ? ' no total' : ''}` : `à vista, ${money(total)}`}.`,
       action: { label: 'Desfazer', run: () => { write(store.removeMany(fresh.map(x => [coll, x.id]))); write(store.setMany(coll, old.map(ownAuthor))); } },
     });
   }
