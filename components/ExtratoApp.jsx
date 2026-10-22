@@ -433,6 +433,7 @@ export default function ExtratoApp({ spacesApi }) {
       count: item.installmentTotal > 1 ? item.installmentTotal : 1,
       current: item.installmentTotal > 1 ? item.installmentNumber : 1,
       people, personTotals,
+      start: all.map(x => x.date).sort()[0] || item.date, // data da 1ª parcela
       uneven: personTotals.some(v => Math.abs(v - personTotals[0]) > 0.01 * people.length),
     };
   }
@@ -442,11 +443,14 @@ export default function ExtratoApp({ spacesApi }) {
   // ficam como já pagas). Mantém quem divide (na mesma proporção), cartão/lista,
   // forma e ocultação. Um fixo (ex.: consórcio lançado como fixo) vira parcelado
   // do mesmo jeito; se o mês da parcela atual já estava pago, ela fica paga.
+  // Virar fixo (`rebuild.fixed`): começa na data da 1ª parcela, para os meses
+  // passados continuarem lá (fora do cartão, os já pagos seguem pagos).
   function rebuildPurchase(coll, item, patch) {
     const old = entriesInScope(entriesOf(coll), item, 'all');
     const info = purchaseInfo(item);
-    const count = Math.max(1, Math.min(480, Math.floor(Number(patch.rebuild.count)) || 1));
-    const current = Math.max(1, Math.min(count, Math.floor(Number(patch.rebuild.current)) || 1));
+    const toFixed = !!patch.rebuild.fixed;
+    const count = toFixed ? 1 : Math.max(1, Math.min(480, Math.floor(Number(patch.rebuild.count)) || 1));
+    const current = toFixed ? 1 : Math.max(1, Math.min(count, Math.floor(Number(patch.rebuild.current)) || 1));
     const total = Number(patch.rebuild.total) || info.total;
     const extra = {
       ...(item.cardId ? { cardId: item.cardId } : { groupId: item.groupId || DEFAULT_GROUP, ...(item.method ? { method: item.method } : {}) }),
@@ -458,12 +462,16 @@ export default function ExtratoApp({ spacesApi }) {
       personId: info.people[0],
       splitWith: info.people.slice(1),
       ...(info.uneven ? { shares: splitByWeights(total, info.personTotals) } : {}),
-      date: patch.date || item.date,
+      date: toFixed ? info.start : patch.date || item.date,
       category: patch.category || item.category,
-      fixed: false,
+      fixed: toFixed,
       installments: count,
-      paidInstallments: current - 1,
+      paidInstallments: toFixed ? 0 : current - 1,
     }, extra).map(x => {
+      if (toFixed) {
+        if (coll !== 'otherExpenses') return x;
+        return { ...x, paidMonths: [...new Set(old.filter(o => o.personId === x.personId && o.paid).map(o => o.date.slice(0, 7)))] };
+      }
       if (!item.fixed || x.installmentNumber !== current) return x;
       const was = old.find(o => o.personId === x.personId);
       return was && isPaidIn(was, x.date.slice(0, 7)) ? { ...x, paid: true } : x;
@@ -471,7 +479,7 @@ export default function ExtratoApp({ spacesApi }) {
     write(store.removeMany(old.map(x => [coll, x.id])));
     write(store.setMany(coll, fresh));
     setToast({
-      text: `“${item.description}” ${item.fixed ? 'virou parcelado' : 'refeito'}: ${count > 1 ? `${count}x de ${money(total / (info.uneven ? 1 : info.people.length) / count)}${info.uneven ? ' no total' : ''}` : `à vista, ${money(total)}`}.`,
+      text: toFixed ? `“${item.description}” virou fixo: ${money(total)} por mês.` : `“${item.description}” ${item.fixed ? 'virou parcelado' : 'refeito'}: ${count > 1 ? `${count}x de ${money(total / (info.uneven ? 1 : info.people.length) / count)}${info.uneven ? ' no total' : ''}` : `à vista, ${money(total)}`}.`,
       action: { label: 'Desfazer', run: () => { write(store.removeMany(fresh.map(x => [coll, x.id]))); write(store.setMany(coll, old.map(ownAuthor))); } },
     });
   }

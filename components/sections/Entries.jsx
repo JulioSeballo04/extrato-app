@@ -8,7 +8,9 @@ import { CATEGORIES, DEFAULT_CATEGORY, money, parseAmount, amountInput, fmtDate,
 export const OUTSIDE_CARD = 'outside';
 
 // Formulário único de "Novo gasto": no cartão ou fora dele. O essencial fica à
-// vista; parcelas, divisão e "fixo" ficam em "Mais opções".
+// vista, com o pagamento (à vista, parcelado ou fixo); entrada, divisão e
+// "esconder" ficam em "Mais opções". No parcelado, informa-se o valor da
+// parcela e o número de parcelas, e o app calcula o total.
 export function EntryForm({ people, cards, selectedMonth, initialTarget, onSubmit, onClose, personColor, defaultPersonId, members = [], groups = [] }) {
   const [target, setTarget] = useState(initialTarget ?? (cards[0]?.id || OUTSIDE_CARD));
   const [method, setMethod] = useState(lastMethod());
@@ -18,8 +20,9 @@ export function EntryForm({ people, cards, selectedMonth, initialTarget, onSubmi
   const [personId, setPersonId] = useState(defaultPersonId || people[0]?.id || '');
   const [date, setDate] = useState(defaultDateFor(selectedMonth));
   const [category, setCategory] = useState(DEFAULT_CATEGORY);
-  const [fixed, setFixed] = useState(false);
-  const [installments, setInstallments] = useState('1');
+  const [kind, setKind] = useState('once'); // ver PAY_KINDS
+  const [by, setBy] = useState('each'); // parcelado: valor da parcela ('each') ou o total
+  const [installments, setInstallments] = useState('');
   const [paidInstallments, setPaidInstallments] = useState('0');
   const [splitWith, setSplitWith] = useState([]);
   // Divisão em partes iguais ou com o valor de cada um (ex.: eu 36, a Sofia 14).
@@ -32,14 +35,18 @@ export function EntryForm({ people, cards, selectedMonth, initialTarget, onSubmi
   const [hideFrom, setHideFrom] = useState([]); // membros que não vão ver (ex.: presente)
   const [errors, setErrors] = useState({});
 
-  const installmentsNum = Math.max(1, Math.floor(Number(installments)) || 1);
+  const installmentsNum = kind === 'installments' ? Math.max(1, Math.min(480, Math.floor(Number(installments)) || 1)) : 1;
   const paidNum = Math.min(installmentsNum, Math.max(0, Math.floor(Number(paidInstallments)) || 0));
   const participants = [personId, ...splitWith.filter(id => id !== personId)];
   const splitCount = participants.length;
   const custom = splitCount > 1 && splitMode === 'custom';
-  const value = parseAmount(amount);
-  const downValue = parseAmount(down);
+  const downValue = kind === 'fixed' ? 0 : parseAmount(down);
   const hasDown = downValue > 0;
+  const entered = parseAmount(amount);
+  // Valor total da compra: no parcelado pela parcela, parcela × número + entrada.
+  const value = kind === 'installments' && by === 'each'
+    ? Math.round((entered * installmentsNum + (hasDown ? downValue : 0)) * 100) / 100
+    : entered;
   const shares = custom ? participants.map(id => parseAmount(shareInputs[id] || '')) : null;
   const sharesLeft = custom ? Math.round((value - shares.reduce((a, b) => a + b, 0)) * 100) / 100 : 0;
   // Mesmos centavos que serão gravados (ver purchasePlan): podem variar 1 centavo.
@@ -48,8 +55,21 @@ export function EntryForm({ people, cards, selectedMonth, initialTarget, onSubmi
   const minPart = Math.min(...parts);
   const maxPart = Math.max(...parts);
   const restValue = Math.round((value - (hasDown ? downValue : 0)) * 100) / 100;
-  const isFixed = installmentsNum === 1 && fixed && !hasDown;
+  const isFixed = kind === 'fixed';
 
+  // Ao trocar o pagamento, o valor já digitado mantém o sentido: o total da
+  // compra continua o total (no parcelado, vira "Valor total").
+  function chooseKind(k) {
+    if (k === kind) return;
+    if (kind === 'installments' && by === 'each' && entered > 0) setAmount(amountInput(value));
+    if (k === 'installments') setBy(entered > 0 ? 'total' : 'each');
+    setKind(k);
+    setErrors(x => ({ ...x, amount: null, installments: null }));
+  }
+  function chooseBy(to) {
+    setAmount(convertBy(amount, to, installmentsNum, hasDown ? downValue : 0));
+    setBy(to);
+  }
   function choosePerson(id) {
     setPersonId(id);
     setSplitWith(prev => prev.filter(x => x !== id));
@@ -80,7 +100,8 @@ export function EntryForm({ people, cards, selectedMonth, initialTarget, onSubmi
   function submit(e) {
     e.preventDefault();
     const nextErrors = {};
-    if (!(value > 0)) nextErrors.amount = 'Informe um valor maior que zero.';
+    if (kind === 'installments' && !(Math.floor(Number(installments)) >= 2)) nextErrors.installments = 'Informe o número de parcelas (2 ou mais).';
+    if (!(entered > 0)) nextErrors.amount = kind === 'installments' && by === 'each' ? 'Informe o valor da parcela.' : 'Informe um valor maior que zero.';
     else if (hasDown && downValue >= value) nextErrors.down = 'A entrada precisa ser menor que o valor total.';
     else if (custom && shares.some(s => !(s > 0))) nextErrors.split = 'Informe um valor maior que zero para cada pessoa.';
     else if (custom && sharesLeft !== 0) nextErrors.split = sharesLeft > 0 ? `Faltam ${money(sharesLeft)} para fechar o total.` : `As partes passam ${money(-sharesLeft)} do total.`;
@@ -104,11 +125,13 @@ export function EntryForm({ people, cards, selectedMonth, initialTarget, onSubmi
   return (
     <Sheet title="Novo gasto" onClose={onClose}>
       <form onSubmit={submit} noValidate style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem', marginTop: '0.6rem' }}>
+        <PayKindPicker kind={kind} setKind={chooseKind} />
         <div className="grid-2">
           <label className="field">
-            Valor total
+            {valueLabel(kind, by)}
             <MoneyInput value={amount} onChange={v => { setAmount(v); setErrors(x => ({ ...x, amount: null })); }}
               aria-invalid={!!errors.amount} className="money-lg" />
+            {kind === 'installments' && <ByToggle by={by} onChange={chooseBy} />}
             {errors.amount && <span style={{ color: 'var(--danger)' }}>{errors.amount}</span>}
           </label>
           <label className="field">
@@ -117,6 +140,23 @@ export function EntryForm({ people, cards, selectedMonth, initialTarget, onSubmi
             {errors.desc && <span style={{ color: 'var(--danger)' }}>{errors.desc}</span>}
           </label>
         </div>
+
+        {kind === 'installments' && (
+          <div className="grid-2">
+            <label className="field">
+              Número de parcelas
+              <input type="number" inputMode="numeric" min="2" max="480" placeholder="Ex.: 10" value={installments}
+                onChange={e => { setInstallments(e.target.value); setErrors(x => ({ ...x, installments: null })); }} aria-invalid={!!errors.installments} />
+              {errors.installments && <span style={{ color: 'var(--danger)' }}>{errors.installments}</span>}
+              {by === 'each' && value > 0 && installmentsNum > 1 && <span className="hint">Total da compra: <strong className="mono">{money(value)}</strong></span>}
+            </label>
+            <label className="field">
+              Parcelas já pagas
+              <input type="number" inputMode="numeric" min="0" max={installmentsNum} value={paidInstallments}
+                onChange={e => setPaidInstallments(e.target.value)} />
+            </label>
+          </div>
+        )}
 
         <label className="field">
           Onde
@@ -155,34 +195,19 @@ export function EntryForm({ people, cards, selectedMonth, initialTarget, onSubmi
 
         <button type="button" className="ghost" onClick={() => setShowMore(s => !s)} aria-expanded={showMore} style={{ alignSelf: 'flex-start' }}>
           <ChevronDown size={14} style={{ transform: showMore ? 'rotate(180deg)' : 'none' }} />
-          Mais opções (parcelas, entrada, fixo, dividir{members.length > 0 ? ', esconder' : ''})
+          Mais opções ({kind !== 'fixed' ? 'entrada, ' : ''}dividir{members.length > 0 ? ', esconder' : ''})
         </button>
 
         {showMore && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.8rem', padding: '0.8rem', borderRadius: 12, background: 'var(--panel-alt)' }}>
-            <div className="grid-2">
-              <label className="field">
-                Parcelas
-                <input type="number" inputMode="numeric" min="1" max="480" value={installments} onChange={e => setInstallments(e.target.value)} />
-              </label>
-              <label className="field">
-                Parcelas já pagas
-                <input type="number" inputMode="numeric" min="0" max={installmentsNum} value={paidInstallments}
-                  onChange={e => setPaidInstallments(e.target.value)} disabled={installmentsNum === 1} />
-              </label>
-            </div>
-            <div className="field" role="group" aria-label="Entrada">
+            {kind !== 'fixed' && <div className="field" role="group" aria-label="Entrada">
               <label className="field">
                 Entrada já paga à parte (opcional)
                 <MoneyInput value={down} onChange={v => { setDown(v); setErrors(x => ({ ...x, down: null })); }} aria-invalid={!!errors.down} />
               </label>
               {errors.down && <span style={{ color: 'var(--danger)' }}>{errors.down}</span>}
               {hasDown && <MethodPicker method={downMethod} setMethod={m => setDownMethod(m || 'pix')} label="Entrada paga com" />}
-            </div>
-            <label className="label-sm" style={{ cursor: installmentsNum > 1 || hasDown ? 'not-allowed' : 'pointer' }}>
-              <input type="checkbox" checked={isFixed} disabled={installmentsNum > 1 || hasDown} onChange={e => setFixed(e.target.checked)} />
-              Gasto fixo (repete todo mês, ex.: aluguel, assinatura)
-            </label>
+            </div>}
             {members.length > 0 && (
               <HideFromPicker members={members} hideFrom={hideFrom} setHideFrom={setHideFrom} />
             )}
@@ -421,28 +446,35 @@ function EditRow({ item, selectedMonth, people, cards, groups = [], members = []
   const [error, setError] = useState('');
   const set = patch => { setError(''); setDraft(d => ({ ...d, ...patch })); };
   const isInstallment = item.installmentTotal > 1;
-  // "Corrigir parcelamento": refaz a compra inteira com outro número de parcelas.
-  // Num fixo (ex.: consórcio), "Transformar em parcelas": a parcela atual fica
-  // no mês exibido. Por padrão informa-se o valor da parcela e o app calcula o total.
+  // "Mudar forma de pagamento": refaz a compra inteira à vista, parcelada ou
+  // fixa, com as mesmas opções do "Novo gasto" (ver PAY_KINDS). No parcelado,
+  // a parcela atual fica nesta linha (num fixo, no mês exibido).
   const info = purchaseInfo?.(item);
   const fixedItem = !!item.fixed;
   const [fixing, setFixing] = useState(false);
   const [plan, setPlan] = useState(() => ({
-    total: amountInput(info ? info.total / info.count : item.amount),
-    count: fixedItem ? '' : String(info?.count || 1), current: String(info?.current || 1),
-    by: 'each', // valor informado: de cada parcela ('each') ou o total da compra
+    kind: 'installments',
+    // Valor informado: o da parcela ('each') ou o total. À vista, já vem o total.
+    by: isInstallment || fixedItem ? 'each' : 'total',
+    value: amountInput(info ? info.total / info.count : item.amount),
+    count: isInstallment ? String(info?.count || '') : '', current: String(info?.current || 1),
   }));
   const setPlanField = p => { setError(''); setPlan(x => ({ ...x, ...p })); };
-  const planCount = Math.max(1, Math.floor(Number(plan.count)) || 1);
+  const planCount = plan.kind === 'installments' ? Math.max(1, Math.min(480, Math.floor(Number(plan.count)) || 1)) : 1;
   const planCurrent = Math.min(planCount, Math.max(1, Math.floor(Number(plan.current)) || 1));
-  const planTotal = plan.by === 'each' ? Math.round(parseAmount(plan.total) * planCount * 100) / 100 : parseAmount(plan.total);
+  const planValue = parseAmount(plan.value);
+  const planTotal = plan.kind === 'installments' && plan.by === 'each' ? Math.round(planValue * planCount * 100) / 100 : planValue;
   const planEach = planTotal / (info?.uneven ? 1 : info?.people.length || 1) / planCount;
   const planDate = fixedItem && draft.date === item.date && selectedMonth ? dueDateIn(item, selectedMonth) : draft.date;
-  function setPlanBy(by) {
-    if (by === plan.by) return;
-    const v = parseAmount(plan.total);
-    const next = by === 'each' ? v / planCount : v * planCount;
-    setPlanField({ by, total: v ? amountInput(Math.round(next * 100) / 100) : '' });
+  // Ao trocar a forma, o valor digitado mantém o sentido (total, parcela ou mês).
+  function setPlanKind(kind) {
+    if (kind === plan.kind) return;
+    if (kind === 'once') setPlanField({ kind, value: planTotal ? amountInput(planTotal) : '' });
+    else if (kind === 'fixed') setPlanField({ kind, value: plan.kind === 'installments' && plan.by === 'total' ? convertBy(plan.value, 'each', planCount) : plan.value });
+    else setPlanField({ kind, by: plan.kind === 'once' ? 'total' : 'each' });
+  }
+  function setPlanBy(to) {
+    setPlanField({ by: to, value: convertBy(plan.value, to, planCount) });
   }
   const targetCard = cards.find(c => c.id === draft.target);
   const realCards = cards.filter(c => c.kind !== 'payee');
@@ -451,10 +483,10 @@ function EditRow({ item, selectedMonth, people, cards, groups = [], members = []
   function submit(e) {
     e.preventDefault();
     if (fixing) {
-      if (!(planTotal > 0)) { setError(plan.by === 'each' ? 'Informe o valor da parcela.' : 'Informe o valor total da compra.'); return; }
-      if (fixedItem && !(Number(plan.count) > 1)) { setError('Informe em quantas parcelas é.'); return; }
+      if (!(planValue > 0)) { setError(`Informe o ${valueLabel(plan.kind, plan.by).toLowerCase()}.`); return; }
+      if (plan.kind === 'installments' && !(Math.floor(Number(plan.count)) >= 2)) { setError('Informe o número de parcelas (2 ou mais).'); return; }
       if (Number(plan.current) > planCount) { setError('A parcela atual não pode passar do número de parcelas.'); return; }
-      onSave({ ...draft, date: planDate, rebuild: { total: planTotal, count: planCount, current: planCurrent } });
+      onSave({ ...draft, date: planDate, rebuild: { total: planTotal, count: planCount, current: planCurrent, fixed: plan.kind === 'fixed' } });
       return;
     }
     const amount = parseAmount(draft.amount);
@@ -487,7 +519,7 @@ function EditRow({ item, selectedMonth, people, cards, groups = [], members = []
           <MoneyInput value={draft.amount} onChange={v => set({ amount: v })} aria-invalid={!!error} />
         </label>
         <label className="field">
-          Pagamento
+          Onde
           <select value={draft.target} onChange={e => set({ target: e.target.value })}>
             {realCards.map(c => <option key={c.id} value={c.id}>Cartão {c.name}</option>)}
             {payees.map(c => <option key={c.id} value={c.id}>Devo para {c.name}</option>)}
@@ -512,35 +544,42 @@ function EditRow({ item, selectedMonth, people, cards, groups = [], members = []
         </label>
       </div>
       <p className="hint" style={{ margin: '0.5rem 0 0' }}>{payHint}</p>
-      {info && (fixedItem || !draft.fixed) && (
+      {info && (
         <div style={{ marginTop: '0.6rem' }}>
           <button type="button" className={`ghost${fixing ? ' active' : ''}`} onClick={() => setFixing(f => !f)} aria-expanded={fixing}>
-            {fixing ? 'Cancelar' : fixedItem ? 'Transformar em parcelas' : 'Corrigir parcelamento'}
+            {fixing ? 'Cancelar mudança de pagamento' : 'Mudar forma de pagamento'}
           </button>
           {fixing && (
-            <div style={{ marginTop: '0.6rem', padding: '0.6rem', borderRadius: 10, border: '1px solid var(--border-strong)' }}>
+            <div style={{ marginTop: '0.6rem', padding: '0.6rem', borderRadius: 10, border: '1px solid var(--border-strong)', display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+              <PayKindPicker kind={plan.kind} setKind={setPlanKind} disabled={fixedItem ? { fixed: 'Já é um gasto fixo' } : {}} />
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.6rem' }}>
                 <label className="field">
-                  {plan.by === 'each' ? `Valor da parcela${info.people.length > 1 ? ' (somando todos)' : ''}` : 'Valor total da compra'}
-                  <MoneyInput value={plan.total} onChange={v => setPlanField({ total: v })} />
-                  <button type="button" className="ghost" style={{ alignSelf: 'flex-start', fontSize: '0.75rem', padding: '0.2rem 0.5rem' }} onClick={() => setPlanBy(plan.by === 'each' ? 'total' : 'each')}>
-                    {plan.by === 'each' ? 'Prefiro informar o total' : 'Prefiro informar a parcela'}
-                  </button>
+                  {valueLabel(plan.kind, plan.by)}{info.people.length > 1 && plan.kind !== 'once' && !(plan.kind === 'installments' && plan.by === 'total') ? ' (somando todos)' : ''}
+                  <MoneyInput value={plan.value} onChange={v => setPlanField({ value: v })} />
+                  {plan.kind === 'installments' && <ByToggle by={plan.by} onChange={setPlanBy} />}
                 </label>
-                <label className="field">
-                  Número de parcelas
-                  <input type="number" inputMode="numeric" min="1" max="480" value={plan.count} placeholder={fixedItem ? 'Ex.: 100' : undefined} onChange={e => setPlanField({ count: e.target.value })} />
-                </label>
-                <label className="field">
-                  Esta é a parcela nº
-                  <input type="number" inputMode="numeric" min="1" max={planCount} value={plan.current} onChange={e => setPlanField({ current: e.target.value })} />
-                </label>
+                {plan.kind === 'installments' && (
+                  <>
+                    <label className="field">
+                      Número de parcelas
+                      <input type="number" inputMode="numeric" min="2" max="480" value={plan.count} placeholder="Ex.: 10" onChange={e => setPlanField({ count: e.target.value })} />
+                    </label>
+                    <label className="field">
+                      Esta é a parcela nº
+                      <input type="number" inputMode="numeric" min="1" max={planCount} value={plan.current} onChange={e => setPlanField({ current: e.target.value })} />
+                    </label>
+                  </>
+                )}
               </div>
-              <p className="hint" style={{ margin: '0.5rem 0 0' }}>
-                {planCount > 1
-                  ? <>{fixedItem ? 'Deixa de ser fixo e vira' : 'Vai refazer a compra em'} <strong>{planCount}x</strong> de <strong className="mono">{money(planEach)}</strong>{info.people.length > 1 ? (info.uneven ? ` no total (dividida entre ${info.people.length}, na mesma proporção de hoje)` : ` por pessoa (dividida entre ${info.people.length})`) : ''}: esta linha vira a parcela {planCurrent}/{planCount} em {fmtDate(planDate)}{planCurrent > 1 ? `, e as ${planCurrent - 1} anteriores ficam como já pagas` : ''}{planCount > planCurrent ? `; a última em ${monthLabel(monthsLaterDate(planDate, planCount - planCurrent).slice(0, 7))}` : ''}. Valor total: <strong className="mono">{money(planTotal)}</strong>.</>
-                  : <>Vai virar uma compra à vista de <strong className="mono">{money(planTotal)}</strong>.</>}
-                {' '}{fixedItem ? 'O gasto fixo é substituído pelas parcelas' : 'As parcelas atuais são substituídas'} (dá para desfazer).
+              <p className="hint" style={{ margin: 0 }}>
+                {plan.kind === 'fixed'
+                  ? <>Vira um gasto fixo de <strong className="mono">{money(planTotal)}</strong> por mês{info.people.length > 1 ? `, dividido entre ${info.people.length}` : ''}, desde {fmtDate(info.start)}.</>
+                  : plan.kind === 'once'
+                  ? <>Vira um gasto à vista de <strong className="mono">{money(planTotal)}</strong> em {fmtDate(planDate)}.</>
+                  : planCount > 1
+                  ? <>{fixedItem ? 'Deixa de ser fixo e vira' : 'Vai virar'} <strong>{planCount}x</strong> de <strong className="mono">{money(planEach)}</strong>{info.people.length > 1 ? (info.uneven ? ` no total (dividida entre ${info.people.length}, na mesma proporção de hoje)` : ` por pessoa (dividida entre ${info.people.length})`) : ''}: esta linha vira a parcela {planCurrent}/{planCount} em {fmtDate(planDate)}{planCurrent > 1 ? `, e as ${planCurrent - 1} anteriores ficam como já pagas` : ''}{planCount > planCurrent ? `; a última em ${monthLabel(monthsLaterDate(planDate, planCount - planCurrent).slice(0, 7))}` : ''}. Valor total: <strong className="mono">{money(planTotal)}</strong>.</>
+                  : <>Informe o número de parcelas.</>}
+                {' '}{fixedItem ? 'O gasto fixo é substituído' : isInstallment ? 'As parcelas atuais são substituídas' : 'O lançamento atual é substituído'} (dá para desfazer).
               </p>
             </div>
           )}
@@ -557,7 +596,7 @@ function EditRow({ item, selectedMonth, people, cards, groups = [], members = []
         </div>
       )}
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.6rem' }}>
-        {!isInstallment && (
+        {!isInstallment && !fixing && (
           <label className="label-sm" style={{ cursor: 'pointer' }}>
             <input type="checkbox" checked={draft.fixed} onChange={e => set({ fixed: e.target.checked })} />
             fixo (repete todo mês)
@@ -603,6 +642,48 @@ function TargetGroupOptions({ groups }) {
       {list.map(g => <option key={g.id} value={outsideTarget(g.id)}>{g.name}</option>)}
     </optgroup>
   );
+}
+
+// Como o gasto é pago: à vista, parcelado ou fixo (repete todo mês). O mesmo
+// seletor do "Novo gasto" e de "Mudar forma de pagamento" na edição.
+const PAY_KINDS = [
+  { key: 'once', label: 'À vista' },
+  { key: 'installments', label: 'Parcelado' },
+  { key: 'fixed', label: 'Fixo (todo mês)' },
+];
+function PayKindPicker({ kind, setKind, disabled = {} }) {
+  return (
+    <div className="field" role="group" aria-label="Pagamento">
+      Pagamento
+      <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+        {PAY_KINDS.map(k => (
+          <button key={k.key} type="button" className="chip" aria-pressed={kind === k.key}
+            disabled={!!disabled[k.key]} title={disabled[k.key] || undefined} onClick={() => setKind(k.key)}>
+            {k.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+// Nome do campo de valor conforme o pagamento (`by`: parcela ou total).
+function valueLabel(kind, by) {
+  if (kind === 'installments') return by === 'each' ? 'Valor da parcela' : 'Valor total';
+  return kind === 'fixed' ? 'Valor por mês' : 'Valor';
+}
+function ByToggle({ by, onChange }) {
+  return (
+    <button type="button" className="ghost" style={{ alignSelf: 'flex-start', fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}
+      onClick={() => onChange(by === 'each' ? 'total' : 'each')}>
+      {by === 'each' ? 'Prefiro informar o total' : 'Prefiro informar a parcela'}
+    </button>
+  );
+}
+// Valor digitado ao trocar parcela ↔ total (`extra`: a entrada, fora das parcelas).
+function convertBy(text, to, count, extra = 0) {
+  const v = parseAmount(text);
+  const next = to === 'each' ? (v - extra) / count : v * count + extra;
+  return v && next > 0 ? amountInput(Math.round(next * 100) / 100) : '';
 }
 
 // Forma de pagamento fora do cartão (o crédito é lançar num cartão).
