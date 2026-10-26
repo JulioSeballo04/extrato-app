@@ -3,7 +3,7 @@ import './globals.css';
 import { BRAND } from '../lib/brand';
 
 export const metadata = {
-  title: `${BRAND.name} — ${BRAND.tagline.toLowerCase()}`,
+  title: `${BRAND.name} — ${BRAND.subtitle}`,
   description: BRAND.description,
   applicationName: BRAND.name,
   // iPhone: abre em tela cheia quando instalado pela opção "Adicionar à Tela de Início".

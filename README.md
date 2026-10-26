@@ -1,4 +1,4 @@
-# Gestor de Gastos — app com login e Firestore
+# Extrato+ (Gestor de Contas) — app com login e Firestore
 
 App Next.js com login por e-mail/senha (Firebase Authentication) e dados
 salvos no Firestore, um documento por usuário. Cada conta vê só os

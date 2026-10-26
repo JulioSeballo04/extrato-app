@@ -737,7 +737,10 @@ export default function ExtratoApp({ spacesApi }) {
       <header className="app-header" style={{ padding: '2.5rem 1.5rem 1.5rem', maxWidth: 1180, margin: '0 auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.75rem', flexWrap: 'wrap', minWidth: 0 }}>
-            <h1 className="display app-title" style={{ fontSize: '2.1rem', fontWeight: 700, margin: 0, letterSpacing: '-0.01em' }}>{BRAND.name}</h1>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <h1 className="display app-title" style={{ fontSize: '2.1rem', fontWeight: 700, margin: 0, letterSpacing: '-0.01em', lineHeight: 1.1 }}>{BRAND.name}</h1>
+              <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem', letterSpacing: '0.04em' }}>{BRAND.subtitle}</span>
+            </div>
             {spaces.length > 1 ? (
               <label className="no-print label-sm">
                 <Users size={15} aria-hidden="true" />

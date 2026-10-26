@@ -171,8 +171,11 @@ export default function LoginPage() {
           padding: '2rem',
         }}
       >
-        <div className="display" style={{ fontSize: '1.5rem', marginBottom: '0.25rem' }}>
+        <div className="display" style={{ fontSize: '1.5rem' }}>
           {BRAND.name}
+        </div>
+        <div style={{ color: '#9CA3AF', fontSize: '0.8rem', letterSpacing: '0.04em', marginBottom: '0.75rem' }}>
+          {BRAND.subtitle}
         </div>
         <div style={{ color: '#6B7280', fontSize: '0.85rem', marginBottom: hasInvite ? '0.9rem' : '1.75rem' }}>
           {mode === 'login' ? 'Entre para ver suas contas' : mode === 'cadastro' ? 'Crie sua conta para começar' : 'Vamos enviar um link para você criar uma nova senha'}
