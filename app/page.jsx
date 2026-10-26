@@ -80,15 +80,19 @@ export default function Home() {
           </button>
           <button
             onClick={async () => {
-              await resendVerificationEmail();
-              setResent(true);
+              try {
+                await resendVerificationEmail();
+                setResent('sent');
+              } catch (err) {
+                setResent(err.code === 'auth/too-many-requests' ? 'wait' : 'failed');
+              }
             }}
             style={{
               width: '100%', background: 'transparent', color: pal.accent, border: `1px solid ${pal.borderStrong}`, borderRadius: 8,
               padding: '0.7rem', fontWeight: 600, fontSize: '0.9rem', cursor: 'pointer', marginBottom: '0.6rem',
             }}
           >
-            {resent ? 'E-mail reenviado' : 'Reenviar e-mail'}
+            {{ sent: 'E-mail reenviado', wait: 'Aguarde um minuto e tente de novo', failed: 'Não deu certo, tente de novo' }[resent] || 'Reenviar e-mail'}
           </button>
           <button
             onClick={logout}

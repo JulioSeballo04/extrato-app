@@ -53,16 +53,40 @@ export function AuthProvider({ children }) {
     }
   }
 
+  // E-mail de confirmação com o nosso modelo (app/api/verification-email).
+  // Se o envio próprio não estiver configurado ou falhar, usa o e-mail padrão
+  // do Firebase. Com os emuladores, vai direto para o Firebase (o link aparece
+  // no terminal do emulador).
+  async function sendVerification(user) {
+    if (process.env.NEXT_PUBLIC_USE_EMULATORS !== '1') {
+      let res;
+      try {
+        res = await fetch('/api/verification-email', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${await user.getIdToken()}` },
+        });
+      } catch { /* sem resposta: cai no envio do Firebase */ }
+      if (res?.ok) return;
+      if (res?.status === 429) {
+        throw Object.assign(new Error('Muitos envios'), { code: 'auth/too-many-requests' });
+      }
+    }
+    await sendEmailVerification(user, { url: `${window.location.origin}/` });
+  }
+
   async function register(email, password) {
     const cred = await createUserWithEmailAndPassword(auth, email, password);
     // Envia o e-mail de confirmação; a conta só é considerada verificada
-    // depois que a pessoa clicar no link recebido.
-    await sendEmailVerification(cred.user);
+    // depois que a pessoa clicar no link recebido. Se o envio falhar, a conta
+    // já existe e a tela de confirmação tem o botão "Reenviar e-mail".
+    try {
+      await sendVerification(cred.user);
+    } catch { /* ignora */ }
     return cred;
   }
 
   async function resendVerificationEmail() {
-    if (auth.currentUser) await sendEmailVerification(auth.currentUser);
+    if (auth.currentUser) await sendVerification(auth.currentUser);
   }
 
   // Recarrega os dados do usuário atual (usado para checar se ele já
